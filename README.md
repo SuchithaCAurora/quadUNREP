@@ -1,5 +1,7 @@
 # uav_trajectory_generator (`trajectory_generator_ros2`)
 
+This repository is modified from ACL: https://github.com/kotakondo/uav_trajectory_generator 
+
 ## Figure-8 SITL demo
 
 https://github.com/user-attachments/assets/8b980866-85d8-44ee-91a5-5b93790eceba
