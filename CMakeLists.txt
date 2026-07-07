@@ -41,6 +41,9 @@ add_executable(${PROJECT_NAME}
   src/trajectory_generator_node.cpp
 )
 
+add_executable(follower_traj_generator
+  src/follower_trajectory_node.cpp
+)
 ################## Replacing catkin_package() ####################
 
 ## Declare a cpp library
@@ -65,6 +68,10 @@ target_include_directories(${PROJECT_NAME} PUBLIC
    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
   ${EIGEN3_INCLUDE_DIR})
 
+target_include_directories(follower_traj_generator PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+  ${EIGEN3_INCLUDE_DIR})
 
 ## Specify libraries to link executable targets against
 #target_link_libraries(${PROJECT_NAME}_core
@@ -105,11 +112,20 @@ ament_target_dependencies(${PROJECT_NAME}_core
   Eigen3 
 )
 
+ament_target_dependencies(follower_traj_generator
+  rclcpp
+  std_msgs
+  geometry_msgs
+  snapstack_msgs2
+  Eigen3 
+)
 
 # ROS2:
 # Replaces LIBRARIES keyword from catkin_package()
 # Mark executables and/or libraries for installation 
-install(TARGETS ${PROJECT_NAME} EXPORT export_package
+install(TARGETS ${PROJECT_NAME} 
+  follower_traj_generator
+  EXPORT export_package
   ARCHIVE DESTINATION lib 
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME} 
