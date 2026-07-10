@@ -8,6 +8,8 @@
 #include <cmath>
 #include <string>
 
+#include <iostream>
+
 using std::placeholders::_1;
 
 class FollowerGoalGenerator : public rclcpp::Node
@@ -24,7 +26,8 @@ public:
         this->declare_parameter<double>("publish_freq", 100.0);
         this->declare_parameter<std::string>("leader_topic", "/SQ01/mavros/local_position/odom");
         this->declare_parameter<double>("goal_altitude", 3.0);
-        // Initial position of follower drone with respect to leader drone in map frame
+        this->declare_parameter<double>("tuning_param", 0.01);
+        // Initial position of follower drone with respect to map frame
         this->declare_parameter<std::vector<double>>("init_follower_offset", {0.0, 3.0, 0.0}); 
 
         this->get_parameter("follower_mode", follower_mode_);
@@ -34,7 +37,7 @@ public:
         this->get_parameter("leader_topic", leader_topic_);
         this->get_parameter("goal_altitude", goal_altitude_);
         this->get_parameter("init_follower_offset", init_follower_offset_);
-
+        this->get_parameter("tuning_param", p_tuning_);
         double publish_freq;
         this->get_parameter("publish_freq", publish_freq);
         if (publish_freq <= 0.0) {
@@ -59,6 +62,11 @@ public:
             qos_profile,
             std::bind(&FollowerGoalGenerator::leaderCB, this, _1));
 
+        self_state_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "mavros/local_position/odom",
+            qos_profile,
+            std::bind(&FollowerGoalGenerator::followerCB, this, _1));
+
         goal_pub_ = this->create_publisher<snapstack_msgs2::msg::Goal>("goal", 10);
 
         timer_ = this->create_wall_timer(
@@ -75,44 +83,116 @@ private:
         has_leader_ = true;
     }
 
+    void followerCB(const nav_msgs::msg::Odometry::SharedPtr msg)
+    {
+        follower_odom_ = *msg;
+        has_follower_ = true;
+    }
+
     void pubCB()
     {
-        if (!has_leader_) {
+        if (!has_leader_ || !has_follower_) {
             return;
         }
 
-        const auto& pos = leader_odom_.pose.pose.position;
-        const auto& qmsg = leader_odom_.pose.pose.orientation;
+        const auto& L_pos = leader_odom_.pose.pose.position;
+        const auto& L_qmsg = leader_odom_.pose.pose.orientation;
+        const auto& L_vel = leader_odom_.twist.twist.linear;
 
-        Eigen::Quaterniond q(qmsg.w, qmsg.x, qmsg.y, qmsg.z);
+        const auto& F_pos = follower_odom_.pose.pose.position;
+        const auto& F_qmsg = follower_odom_.pose.pose.orientation;
+
+        Eigen::Quaterniond L_q = quatFromMsg(L_qmsg);
+
+        // Leader/follower positions (note here map and world are the same - TODO: go back and use consistent wording)
+        Eigen::Vector3d leader_pos_world(L_pos.x, L_pos.y, L_pos.z);
+        Eigen::Vector3d follower_pos_local(F_pos.x, F_pos.y, F_pos.z);
 
         // Offset in leader body frame: behind leader in T, and optionally lateral/vertical offsets
-        Eigen::Vector3d offset_base(
-            -follower_distance_T_,
-            -follower_distance_N_,
-            -follower_distance_B_
+        Eigen::Vector3d desired_offset_tnb(
+            follower_distance_T_,
+            follower_distance_N_,
+            follower_distance_B_
         );
-
-        Eigen::Vector3d init_pos_offset(
+        // Apply startup correction so follower is placed into the shared world frame
+        Eigen::Vector3d init_offset_world(
             init_follower_offset_[0],
             init_follower_offset_[1],
-            init_follower_offset_[2]
-        );
+            init_follower_offset_[2]);
 
-        Eigen::Vector3d offset_world = q * offset_base - init_pos_offset;
+        // desired position of the follower in the world frame
+        Eigen::Vector3d desired_p_follower = leader_pos_world + L_q * desired_offset_tnb - init_offset_world;
+
+
+        Eigen::Vector3d follower_pos_world = follower_pos_local + init_offset_world;
+        // Relative displacement from follower to leader in world
+        Eigen::Vector3d rel_world = leader_pos_world - follower_pos_world;
+        // Express relative displacement in leader body frame (TNB)
+        Eigen::Vector3d rel_tnb = L_q.inverse() * rel_world;
+
+        // Formation error in leader frame
+        Eigen::Vector3d e_form = rel_tnb - desired_offset_tnb;
+
+        // Leader velocity in world and leader frame
+        Eigen::Vector3d leader_vel_world(L_vel.x, L_vel.y, L_vel.z);
+        Eigen::Vector3d leader_vel_tnb = L_q.inverse() * leader_vel_world;
+
+        double sT = e_form.x();
+        double sN = e_form.y();
+        double sB = e_form.z();
+        double uT = leader_vel_tnb.x() + u_follower_max_ * sT / std::sqrt(sT*sT + p_tuning_ * p_tuning_);
+        double uN = leader_vel_tnb.y() + u_follower_max_ * sN / std::sqrt(sN*sN + p_tuning_ * p_tuning_);
+        double uB = leader_vel_tnb.z() + u_follower_max_ * sB / std::sqrt(sB*sB + p_tuning_ * p_tuning_);
+
+        Eigen::Vector3d v_TNB(uT,uN,uB);
+        // Get velocity back into world frame
+        Eigen::Vector3d v_world = L_q * v_TNB;
+
+        // Eigen::Vector3d offset_world = L_q * offset_base - init_pos_offset;
 
         snapstack_msgs2::msg::Goal goal;
         goal.header.stamp = this->now();
 
         // position target
-        goal.p.x = pos.x + offset_world.x();
-        goal.p.y = pos.y + offset_world.y();
-        goal.p.z = goal_altitude_; //pos.z + offset_world.z();
+        goal.p.x = desired_p_follower.x(); //L_pos.x + offset_world.x();
+        goal.p.y = desired_p_follower.y(); //L_pos.y + offset_world.y();
+        goal.p.z = desired_p_follower.z(); //L_pos.z + offset_world.z();
 
         // velocity / accel / jerk can be zero for now
-        goal.v.x = 0.0;
-        goal.v.y = 0.0;
-        goal.v.z = 0.0;
+
+        // compute desired velocities
+        
+
+        // Decompose follower pose into the TNB coordinate system aligned with body of leader
+        // Requires listening to the leader's velocity and knowing own current position
+            // extract from twist
+        // get change of basis matrix'
+        // geometry_msgs::msg::TransformStamped transform;
+        // // TODO: how do I access the namespace of this node? Call it ns_
+        // if (listener.canTransform(leader_ns_+"/base_link", ns_+"/base_link", ros::Time(0), ros::Duration(1.0))){
+        //     transform = listener.lookupTransform(leader_ns_+"/base_link", ns_+"/base_link", ros::Time(0));
+        // }
+        // Eigen::Vector3d displacement_mapframe(L_pos.x - F_pos.x, L_pos.y - F_pos.y, L_pos.z - F_pos.z);
+        // displacement_mapframe = displacement_mapframe + init_pos_offset;
+        // Eigen::Vector3d displacement_Lframe = tf2::transformPoint(displacement_mapframe, transform);
+
+        // double tuning_param = 1.0;
+
+        // L_T_vel_ = L_vel.x + u_follower_max * displacement_Lframe[0]/sqrt(displacement_Lframe*displacement_Lframe + tuning_param*tuning_param);
+        // L_N_vel_ = L_vel.y + u_follower_max * displacement_Lframe[1]/sqrt(displacement_Lframe*displacement_Lframe + tuning_param*tuning_param);
+        // L_B_vel_ = L_vel.z + + u_follower_max * displacement_Lframe[2]/sqrt(displacement_Lframe*displacement_Lframe + tuning_param*tuning_param);
+        // Eigen::Vector3d S(L_T_vel_, L_N_vel_, L_B_vel_);
+        // // The above is still in the frame of the leader. Transform back to the follower's frame so that the commands can be given to the follower
+        // if (listener.canTransform(ns_+"/base_link", leader_ns_+"/base_link", ros::Time(0), ros::Duration(1.0))){
+        //     transform_to_F = listener.lookupTransform(ns_+"/base_link", leader_ns_+"/base_link", ros::Time(0));
+        // }
+        // Eigen::Vector3d follower_velocities = tf2::transformPoint(S, transform_to_F);
+
+        goal.v.x = 0.0;//v_world.x();
+        goal.v.y = 0.0;//v_world.y();
+        goal.v.z = 0.0;//v_world.z();
+
+        // END OF NEW LOGIC
 
         goal.a.x = 0.0;
         goal.a.y = 0.0;
@@ -123,7 +203,7 @@ private:
         goal.j.z = 0.0;
 
         // same yaw as leader
-        goal.psi = quat2yaw(qmsg);
+        goal.psi = quat2yaw(L_qmsg);
         goal.dpsi = 0.0;
 
         // This is important for your existing FSM / offboard logic
@@ -138,7 +218,7 @@ private:
             *this->get_clock(),
             1000,
             "Leader (%.2f, %.2f, %.2f) -> Goal (%.2f, %.2f, %.2f)",
-            pos.x, pos.y, pos.z,
+            L_pos.x, L_pos.y, L_pos.z,
             goal.p.x, goal.p.y, goal.p.z);
     }
 
@@ -149,22 +229,41 @@ private:
             1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     }
 
+    static Eigen::Quaterniond quatFromMsg(const geometry_msgs::msg::Quaternion & qmsg)
+    {
+        Eigen::Quaterniond q(qmsg.w, qmsg.x, qmsg.y, qmsg.z);
+        q.normalize();
+        return q;
+    }
+
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr leader_state_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr self_state_sub_;
     rclcpp::Publisher<snapstack_msgs2::msg::Goal>::SharedPtr goal_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     nav_msgs::msg::Odometry leader_odom_;
+    nav_msgs::msg::Odometry follower_odom_;
     bool has_leader_{false};
+    bool has_follower_{false};
+
+    // for velocity commands
+    double u_follower_max_ = 2.0; // max speed m/s which follower can approach leader
+    double L_T_vel_;
+    double L_N_vel_;
+    double L_B_vel_;
 
     std::string follower_mode_{"heading_based"};
-    std::string leader_topic_{"/SQ01/mavros/local_position/odom"};
+    std::string leader_topic_;
     double follower_distance_T_;
     double follower_distance_N_;
     double follower_distance_B_;
     double goal_altitude_;
     double dt_{0.01};
     std::vector<double> init_follower_offset_;
+    double p_tuning_;
+
 };
+
 
 int main(int argc, char** argv)
 {
