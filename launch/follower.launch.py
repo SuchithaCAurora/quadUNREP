@@ -28,8 +28,8 @@ def generate_launch_description():
     follower_trajectory_node = Node(
         package='trajectory_generator_ros2',
         namespace=namespace,
-        executable='follower_traj_generator',
-        name='follower_traj_generator',
+        executable='follower_traj_generator2',
+        name='follower_traj_generator2',
         output='screen',
         parameters=[os.path.join(
             get_package_share_directory('trajectory_generator_ros2'),

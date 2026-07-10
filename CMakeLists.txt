@@ -44,6 +44,10 @@ add_executable(${PROJECT_NAME}
 add_executable(follower_traj_generator
   src/follower_trajectory_node.cpp
 )
+
+add_executable(follower_traj_generator2
+  src/follower_trajecotry_node2.cpp
+)
 ################## Replacing catkin_package() ####################
 
 ## Declare a cpp library
@@ -69,6 +73,11 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   ${EIGEN3_INCLUDE_DIR})
 
 target_include_directories(follower_traj_generator PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+  ${EIGEN3_INCLUDE_DIR})
+
+target_include_directories(follower_traj_generator2 PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
   ${EIGEN3_INCLUDE_DIR})
@@ -120,17 +129,31 @@ ament_target_dependencies(follower_traj_generator
   Eigen3 
 )
 
+ament_target_dependencies(follower_traj_generator2
+  rclcpp
+  std_msgs
+  geometry_msgs
+  snapstack_msgs2
+  Eigen3 
+)
+
 # ROS2:
 # Replaces LIBRARIES keyword from catkin_package()
 # Mark executables and/or libraries for installation 
+# install(TARGETS ${PROJECT_NAME} 
+#   follower_traj_generator
+#   EXPORT export_package
+#   ARCHIVE DESTINATION lib 
+#   LIBRARY DESTINATION lib
+#   RUNTIME DESTINATION lib/${PROJECT_NAME} 
+# )
 install(TARGETS ${PROJECT_NAME} 
-  follower_traj_generator
+  follower_traj_generator2
   EXPORT export_package
   ARCHIVE DESTINATION lib 
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME} 
 )
-
 # Mark header files for installation 
 install(
   DIRECTORY include/${PROJECT_NAME}/
