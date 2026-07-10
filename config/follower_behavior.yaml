@@ -1,0 +1,11 @@
+SQ02:
+  follower_traj_generator2:
+    ros__parameters:
+      follower_mode: "heading_based"
+      follower_distance_T: 1.0
+      follower_distance_N: 0.0
+      follower_distance_B: 0.0
+      publish_freq: 100.0
+      leader_topic: "/SQ01/mavros/local_position/odom"
+      goal_altitude: 3.0
+      init_follower_offset: [0.0, 3.0, 0.0]

@@ -21,7 +21,7 @@ def generate_launch_description():
         description='Vehicle number'
     )
 
-    # Namespaec from veh and num arguements
+    # Namespace from veh and num arguements
     namespace = [LaunchConfiguration('veh'), LaunchConfiguration('num')]
 
     # Define node 
@@ -34,7 +34,7 @@ def generate_launch_description():
         parameters=[os.path.join(
             get_package_share_directory('trajectory_generator_ros2'),
             'config',
-            'default.yaml'
+            'follower_behavior.yaml'
         )]
     )
 
