@@ -13,6 +13,8 @@ Panels:
         - /Pose1
         - /Odometry1
         - /Odometry1/Topic1
+        - /Axes1
+        - /Axes2
       Splitter Ratio: 0.5
     Tree Height: 708
   - Class: rviz_common/Selection
@@ -78,24 +80,32 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        base_link:
+        SQ01/base_link:
           Value: true
-        base_link_frd:
-          Value: true
+        SQ01/base_link_frd:
+          Value: false
+        SQ01/odom:
+          Value: false
+        SQ01/odom_ned:
+          Value: false
+        SQ02/base_link:
+          Value: false
+        SQ02/base_link_frd:
+          Value: false
+        SQ02/odom:
+          Value: false
+        SQ02/odom_ned:
+          Value: false
         map:
           Value: true
         map_ned:
-          Value: true
-        odom:
-          Value: true
-        odom_ned:
-          Value: true
+          Value: false
         world:
-          Value: true
+          Value: false
         world_mavros:
-          Value: true
+          Value: false
         world_mocap:
-          Value: true
+          Value: false
       Marker Scale: 1
       Name: TF
       Show Arrows: true
@@ -103,12 +113,18 @@ Visualization Manager:
       Show Names: true
       Tree:
         map:
+          SQ01/base_link:
+            SQ01/base_link_frd:
+              {}
+          SQ02/base_link:
+            SQ02/base_link_frd:
+              {}
           map_ned:
             {}
-        world:
-          world_mocap:
-            world_mavros:
-              {}
+          world:
+            world_mocap:
+              world_mavros:
+                {}
       Update Interval: 0
       Value: true
     - Class: rviz_default_plugins/Marker
@@ -251,7 +267,7 @@ Visualization Manager:
           Scale: 1
           Value: true
         Value: true
-      Enabled: true
+      Enabled: false
       Keep: 1
       Name: Odometry
       Position Tolerance: 0.10000000149011612
@@ -272,6 +288,20 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Best Effort
         Value: /SQ01/mavros/local_position/odom
+      Value: false
+    - Class: rviz_default_plugins/Axes
+      Enabled: true
+      Length: 1
+      Name: Axes
+      Radius: 0.10000000149011612
+      Reference Frame: SQ01/base_link
+      Value: true
+    - Class: rviz_default_plugins/Axes
+      Enabled: true
+      Length: 1
+      Name: Axes
+      Radius: 0.10000000149011612
+      Reference Frame: SQ02/base_link
       Value: true
   Enabled: true
   Global Options:
@@ -319,7 +349,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 16.70829963684082
+      Distance: 7.346435546875
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -334,10 +364,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.479796290397644
+      Pitch: -0.10520359873771667
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 1.5553959608078003
+      Yaw: 2.930393934249878
     Saved: ~
 Window Geometry:
   Displays:
@@ -355,5 +385,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1908
-  X: 0
-  Y: 0
+  X: -32
+  Y: -32

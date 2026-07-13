@@ -31,7 +31,9 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(snapstack_msgs2 REQUIRED)
 find_package(Eigen3 REQUIRED)
-
+find_package(visualization_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 ###########
 ## Build ##
 ###########
@@ -47,6 +49,10 @@ add_executable(follower_traj_generator
 
 add_executable(follower_traj_generator2
   src/follower_trajecotry_node2.cpp
+)
+
+add_executable(goal_visualizer
+  src/goal_visualizer.cpp
 )
 ################## Replacing catkin_package() ####################
 
@@ -82,6 +88,10 @@ target_include_directories(follower_traj_generator2 PUBLIC
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
   ${EIGEN3_INCLUDE_DIR})
 
+target_include_directories(goal_visualizer PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+  ${EIGEN3_INCLUDE_DIR})
 ## Specify libraries to link executable targets against
 #target_link_libraries(${PROJECT_NAME}_core
 #  ${catkin_LIBRARIES}
@@ -137,6 +147,14 @@ ament_target_dependencies(follower_traj_generator2
   Eigen3 
 )
 
+ament_target_dependencies(goal_visualizer
+  rclcpp
+  snapstack_msgs2
+  visualization_msgs
+  tf2
+  tf2_geometry_msgs
+)
+
 # ROS2:
 # Replaces LIBRARIES keyword from catkin_package()
 # Mark executables and/or libraries for installation 
@@ -149,11 +167,13 @@ ament_target_dependencies(follower_traj_generator2
 # )
 install(TARGETS ${PROJECT_NAME} 
   follower_traj_generator2
+  goal_visualizer
   EXPORT export_package
   ARCHIVE DESTINATION lib 
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME} 
 )
+
 # Mark header files for installation 
 install(
   DIRECTORY include/${PROJECT_NAME}/
