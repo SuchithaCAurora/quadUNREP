@@ -27,6 +27,8 @@ public:
         this->declare_parameter<std::string>("leader_topic", "/SQ01/mavros/local_position/odom");
         this->declare_parameter<double>("goal_altitude", 3.0);
         this->declare_parameter<double>("tuning_param", 0.01);
+        this->declare_parameter<double>("max_speed", 2.0);
+
         // Initial position of follower drone with respect to map frame
         this->declare_parameter<std::vector<double>>("init_follower_offset", {0.0, 3.0, 0.0}); 
 
@@ -38,6 +40,8 @@ public:
         this->get_parameter("goal_altitude", goal_altitude_);
         this->get_parameter("init_follower_offset", init_follower_offset_);
         this->get_parameter("tuning_param", p_tuning_);
+        this->get_parameter("max_speed", u_follower_max_);
+
         double publish_freq;
         this->get_parameter("publish_freq", publish_freq);
         if (publish_freq <= 0.0) {
@@ -77,6 +81,14 @@ public:
     }
 
 private:
+    double applyDeadband(double e, double db)
+    {
+        if (std::fabs(e) < db) {
+            return 0.0;
+        }
+        return e;
+    }
+
     void leaderCB(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
         leader_odom_ = *msg;
@@ -126,25 +138,29 @@ private:
 
         Eigen::Vector3d follower_pos_world = follower_pos_local + init_offset_world;
         // Relative displacement from follower to leader in world
-        Eigen::Vector3d rel_world = leader_pos_world - follower_pos_world;
+        Eigen::Vector3d rel_world = follower_pos_world - leader_pos_world;
         // Express relative displacement in leader body frame (TNB)
         Eigen::Vector3d rel_tnb = L_q.inverse() * rel_world;
 
         // Formation error in leader frame
-        Eigen::Vector3d e_form = rel_tnb - desired_offset_tnb;
+        Eigen::Vector3d e_form = desired_offset_tnb - rel_tnb;
 
-        // Leader velocity in world and leader frame
-        Eigen::Vector3d leader_vel_world(L_vel.x, L_vel.y, L_vel.z);
-        Eigen::Vector3d leader_vel_tnb = L_q.inverse() * leader_vel_world;
+        // Leader velocity (note that odom twist message is expressed in childe_frame_id)
+        Eigen::Vector3d leader_vel_tnb(L_vel.x, L_vel.y, L_vel.z);
+        // Eigen::Vector3d leader_vel_tnb = L_q.inverse() * leader_vel_world;
 
-        double sT = e_form.x();
-        double sN = e_form.y();
-        double sB = e_form.z();
+        double sT = applyDeadband(e_form.x(), 0.05);
+        double sN = applyDeadband(e_form.y(), 0.05);
+        double sB = applyDeadband(e_form.z(), 0.05);
         double uT = leader_vel_tnb.x() + u_follower_max_ * sT / std::sqrt(sT*sT + p_tuning_ * p_tuning_);
         double uN = leader_vel_tnb.y() + u_follower_max_ * sN / std::sqrt(sN*sN + p_tuning_ * p_tuning_);
         double uB = leader_vel_tnb.z() + u_follower_max_ * sB / std::sqrt(sB*sB + p_tuning_ * p_tuning_);
 
         Eigen::Vector3d v_TNB(uT,uN,uB);
+        double norm = v_TNB.norm();
+        if (norm > u_follower_max_) {
+            v_TNB *= (u_follower_max_ / norm);
+        }
         // Get velocity back into world frame
         Eigen::Vector3d v_world = L_q * v_TNB;
 
@@ -188,9 +204,13 @@ private:
         // }
         // Eigen::Vector3d follower_velocities = tf2::transformPoint(S, transform_to_F);
 
-        goal.v.x = 0.0;//v_world.x();
-        goal.v.y = 0.0;//v_world.y();
-        goal.v.z = 0.0;//v_world.z();
+        // goal.v.x = 0.0;//
+        // goal.v.y = 0.0;//
+        // goal.v.z = 0.0;//
+
+        goal.v.x = v_world.x();
+        goal.v.y = v_world.y();
+        goal.v.z = v_world.z();
 
         // END OF NEW LOGIC
 
@@ -247,7 +267,7 @@ private:
     bool has_follower_{false};
 
     // for velocity commands
-    double u_follower_max_ = 2.0; // max speed m/s which follower can approach leader
+    double u_follower_max_; // max speed m/s which follower can approach leader
     double L_T_vel_;
     double L_N_vel_;
     double L_B_vel_;
