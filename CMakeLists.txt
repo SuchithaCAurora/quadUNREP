@@ -51,6 +51,10 @@ add_executable(follower_traj_generator2
   src/follower_trajecotry_node2.cpp
 )
 
+add_executable(follower_traj_gen_hw
+  src/follower_traj_gen_hw.cpp
+)
+
 add_executable(goal_visualizer
   src/goal_visualizer.cpp
 )
@@ -84,6 +88,11 @@ target_include_directories(follower_traj_generator PUBLIC
   ${EIGEN3_INCLUDE_DIR})
 
 target_include_directories(follower_traj_generator2 PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+  ${EIGEN3_INCLUDE_DIR})
+
+target_include_directories(follower_traj_gen_hw PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
   ${EIGEN3_INCLUDE_DIR})
@@ -147,6 +156,14 @@ ament_target_dependencies(follower_traj_generator2
   Eigen3 
 )
 
+ament_target_dependencies(follower_traj_gen_hw
+  rclcpp
+  std_msgs
+  geometry_msgs
+  snapstack_msgs2
+  Eigen3 
+)
+
 ament_target_dependencies(goal_visualizer
   rclcpp
   snapstack_msgs2
@@ -168,6 +185,7 @@ ament_target_dependencies(goal_visualizer
 install(TARGETS ${PROJECT_NAME} 
   follower_traj_generator2
   goal_visualizer
+  follower_traj_gen_hw
   EXPORT export_package
   ARCHIVE DESTINATION lib 
   LIBRARY DESTINATION lib

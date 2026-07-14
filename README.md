@@ -2,6 +2,13 @@
 
 This repository is modified from ACL: https://github.com/kotakondo/uav_trajectory_generator 
 
+For the UNREP Demo:
+build all packages as described below
+Choose which leader trajectory in the /config/default.yaml file
+Choose follower behaviors in the /config/follower_behavior.yaml file
+Choose any px4 configurations in the /config/px4_config_template.yaml file
+
+Run: python3 uav_trajectory_generator/src/ros2_px4_stack/scripts/tmux/sitl_tmux_multi.py
 ## Figure-8 SITL demo
 
 https://github.com/user-attachments/assets/8b980866-85d8-44ee-91a5-5b93790eceba
