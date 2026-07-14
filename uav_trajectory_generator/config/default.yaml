@@ -1,0 +1,164 @@
+SQ01:
+  trajectory_generator_ros2:
+    ros__parameters:
+      # ====================================================================
+      # Shared settings
+      # ====================================================================
+      alt:       1.8      # [m]  absolute takeoff altitude (world frame z)
+      pub_freq:  100.0    # [Hz] rate at which Goal messages are published
+
+      # Which trajectory to fly. Each name below has its own block of
+      # parameters; only the selected block is read at startup.
+      traj_type: Circle
+      # Options: Circle | Figure8 | Square | Rectangle | Line | Boomerang |
+      #          Reciprocating | Bounce | M | I | T
+
+      # ====================================================================
+      # Per-trajectory blocks — edit only the one you are flying
+      # ====================================================================
+
+      # --- Circle: flat constant-altitude circle in XY plane --------------
+      Circle:
+        r:            3.4              # [m]    radius of the circle
+        center_x:     0.0              # [m]    world-frame X of center
+        center_y:     0.0              # [m]    world-frame Y of center
+        v_goals:      [1.0, 2.0, 2.0]  # [m/s]  speed schedule; one leg per entry.
+                                       #        For each entry the drone ramps up,
+                                       #        holds for t_traj seconds, then
+                                       #        ramps back down to 0.
+        t_traj:       80.0             # [s]    hold time per v_goals entry
+        circle_accel: 0.4              # [m/s^2] cap on tangential accel during
+                                       #         speed ramps (NOT the centripetal
+                                       #         v^2/r load; keep well below g/2).
+
+      # --- Figure8: lemniscate (infinity symbol) in XY plane -------------
+      # Reuses the same semantics as Circle: r, center, v_goals, t_traj,
+      # circle_accel. Loop width is 2*r in X and 4*r in Y (see Figure8.cpp).
+      Figure8:
+        r:            3.4              # [m]    half-width of each lobe
+        center_x:     0.0              # [m]
+        center_y:     0.0              # [m]
+        v_goals:      [2.0, 3.0, 4.0]  # [m/s]  see Circle.v_goals
+        t_traj:       30.0             # [s]
+        circle_accel: 0.4              # [m/s^2]
+
+      # --- Square: trapezoidal-velocity-profile square laps --------------
+      Square:
+        side_length:  2.0    # [m]     length of each side
+        square_accel: 0.4    # [m/s^2] decel/accel cap at corners
+        orientation:  0.0    # [rad]   rotation of the square in XY plane
+        center_x:     0.0    # [m]
+        center_y:     0.0    # [m]
+        v_goals:      [1.0]  # [m/s]   cruise speed per lap (one entry per lap)
+        t_traj:       30.0   # [s]     currently unused by Square but required
+                             #         by the shared param block
+
+      # --- Rectangle: like Square but with separate side lengths ---------
+      Rectangle:
+        side_a:          2.0    # [m]     length of side A
+        side_b:          4.0    # [m]     length of side B
+        rectangle_accel: 0.4    # [m/s^2] decel/accel cap at corners
+        orientation:     0.0    # [rad]
+        center_x:        0.0    # [m]
+        center_y:        0.0    # [m]
+        v_goals:         [1.0]  # [m/s]
+        t_traj:          30.0   # [s]     shared-block placeholder
+
+      # --- Line: one-shot A -> B straight segment ------------------------
+      Line:
+        Ax:         0.0   # [m]     start point X
+        Ay:        -3.0   # [m]     start point Y
+        Bx:         0.0   # [m]     end point X
+        By:         3.0   # [m]     end point Y
+        v_line:     1.0   # [m/s]   cruise speed after accel, before decel
+        line_accel: 1.5   # [m/s^2] accel from 0 -> v_line
+        line_decel: 1.0   # [m/s^2] decel from v_line -> 0 at B
+                          #         (keep <= line_accel so stopping is softer)
+
+      # --- Boomerang: A -> B -> A once -----------------------------------
+      # Same params as Line; the generator returns after reaching B.
+      Boomerang:
+        Ax:         0.0   # [m]
+        Ay:        -3.0   # [m]
+        Bx:         0.0   # [m]
+        By:         3.0   # [m]
+        v_line:     1.0   # [m/s]
+        line_accel: 1.5   # [m/s^2]
+        line_decel: 1.0   # [m/s^2]
+
+      # --- Reciprocating: A <-> B repeatedly for t_traj seconds ----------
+      Reciprocating:
+        Ax:         0.0   # [m]
+        Ay:        -3.0   # [m]
+        Bx:         0.0   # [m]
+        By:         3.0   # [m]
+        v_line:     1.0   # [m/s]
+        line_accel: 1.5   # [m/s^2]
+        line_decel: 1.0   # [m/s^2]
+        t_traj:    30.0   # [s]     total sweep duration
+
+      # --- Bounce: vertical oscillation between two altitudes ------------
+      Bounce:
+        center_x:    0.0    # [m]     fixed XY position of the bounce column
+        center_y:    0.0    # [m]
+        Az:          4.0    # [m]     top altitude
+        Bz:          1.0    # [m]     bottom altitude (must be > ground)
+        orientation: 0.0    # [rad]   heading held during bounce
+        v_goals:     [1.0]  # [m/s]   vertical speed schedule
+        t_traj:     30.0    # [s]     hold time per v_goals entry
+
+      # --- M / I / T: letter-shaped XY trajectories ----------------------
+      # Each letter fits in a <length> tall x <width> wide bounding box.
+      M:
+        center_x:    0.0    # [m]
+        center_y:    0.0    # [m]
+        M_length:    3.0    # [m]     vertical extent of the M
+        M_width:     4.0    # [m]     horizontal extent of the M
+        orientation: 0.0    # [rad]   rotation about center
+        v_goals:     [1.0]  # [m/s]
+        t_traj:     30.0    # [s]     shared-block placeholder
+
+      I:
+        center_x:    0.0    # [m]
+        center_y:    0.0    # [m]
+        I_length:    3.0    # [m]
+        I_width:     4.0    # [m]
+        orientation: 0.0    # [rad]
+        v_goals:     [1.0]  # [m/s]
+        t_traj:     30.0    # [s]
+
+      T:
+        center_x:    0.0    # [m]
+        center_y:    0.0    # [m]
+        T_length:    3.0    # [m]     vertical stem length
+        T_width:     4.0    # [m]     horizontal bar width
+        orientation: 0.0    # [rad]
+        v_goals:     [1.0]  # [m/s]
+        t_traj:     30.0    # [s]
+
+      # ====================================================================
+      # Takeoff / landing / mode-transition speeds (all shared)
+      # ====================================================================
+      vel_initpos:   0.4   # [m/s] horizontal speed flying to the trajectory's
+                           #       initial point after hover
+      vel_take:      0.3   # [m/s] vertical climb speed during takeoff
+      vel_land_fast: 0.35  # [m/s] vertical descent speed until near ground
+      vel_land_slow: 0.04  # [m/s] vertical speed for the final touchdown
+      vel_yaw:       0.2   # [rad/s] slew rate when aligning yaw
+
+      dist_thresh:   0.3   # [m]   position tolerance for "reached" checks
+      yaw_thresh:    0.2   # [rad] yaw tolerance for "aligned" checks
+
+      margin_takeoff_outside_bounds: 0.05  # [m] extra slack around the
+                                           #     room-bounds check at takeoff
+
+      # ====================================================================
+      # Room bounds — a trajectory whose waypoints fall outside this box
+      # will be refused at startup.
+      # ====================================================================
+      x_min: -5.0   # [m]
+      x_max:  5.0   # [m]
+      y_min: -5.0   # [m]
+      y_max:  5.0   # [m]
+      z_min: -5.0   # [m]
+      z_max:  5.0   # [m]

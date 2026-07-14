@@ -1,0 +1,27 @@
+# Pinned versions of the sibling packages that trajectory_generator_ros2
+# depends on at runtime. Use `vcs import` from inside the workspace's src/
+# directory to clone them to the exact commit below.
+#
+# Bumping a pin:
+#   cd src/<pkg>
+#   git pull origin main
+#   git rev-parse HEAD     # copy the new SHA into this file
+#   # commit this .repos change in uav_trajectory_generator so downstream
+#   # clones pick up the new pin.
+repositories:
+  behavior_selector2:
+    type: git
+    url: https://github.com/kotakondo/behavior_selector2.git
+    version: fac290a51f5c29fb7bba77681e09509836fdbd3b
+  mission_mode:
+    type: git
+    url: https://github.com/kotakondo/mission_mode.git
+    version: 00cd9d39b01bb9886cd9637225b32a3e36ccf8a7
+  snapstack_msgs2:
+    type: git
+    url: https://github.com/kotakondo/snapstack_msgs2.git
+    version: 940b42e6eefbd3346b022d79038d903fc78b6d91
+  ros2_px4_stack:
+    type: git
+    url: https://github.com/kotakondo/ros2_px4_stack.git
+    version: 0686b73166286a608961bf54857651b92744119a
