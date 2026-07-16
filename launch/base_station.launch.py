@@ -20,7 +20,7 @@ def generate_launch_description():
             executable="rviz2",
             output="screen",
             arguments= ['-d',
-                os.path.join(get_package_share_directory('trajectory_generator_ros2'),
+                os.path.join(get_package_share_directory('trajectory_generator_ros2_unrep'),
                         'config', 'default.rviz')
             ]
         )

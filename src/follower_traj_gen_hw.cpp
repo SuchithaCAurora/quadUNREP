@@ -31,14 +31,14 @@ public:
         // Parameters
         this->declare_parameter<std::string>("follower_mode", "heading_based");
         this->declare_parameter<double>("follower_distance_T", 0.0);
-        this->declare_parameter<double>("follower_distance_N", 0.0);
-        this->declare_parameter<double>("follower_distance_B", 0.0);
+        this->declare_parameter<double>("follower_distance_N", 1.0);
+        this->declare_parameter<double>("follower_distance_B", 1.0);
         this->declare_parameter<double>("publish_freq", 100.0);
         this->declare_parameter<std::string>("leader_topic_pos", "/PX03/world");
         this->declare_parameter<std::string>("leader_topic_vel", "/PX03/mocap/twist");
         this->declare_parameter<double>("goal_altitude", 3.0);
         this->declare_parameter<double>("tuning_param", 0.01);
-        this->declare_parameter<double>("max_speed", 2.0);
+        this->declare_parameter<double>("max_speed", 0.5);
         this->declare_parameter<double>("deadzone_vctrl", 0.05);
         this->declare_parameter<std::string>("follower_topic_pos", "world");
 
@@ -69,7 +69,8 @@ public:
             RCLCPP_WARN(this->get_logger(),
                         "Invalid follower_mode='%s'. Falling back to 'heading_based'.",
                         follower_mode_.c_str());
-            follower_mode_ = "heading_based";
+            follower_mode_ = "heading_based";     
+
         }
 
         rclcpp::QoS qos_profile(10);
@@ -92,7 +93,7 @@ public:
             qos_profile,
             std::bind(&FollowerGoalGeneratorHW::follower_posCB, this, _1));
 
-        goal_pub_ = this->create_publisher<snapstack_msgs2::msg::Goal>("goal", 10);
+        goal_pub_ = this->create_publisher<snapstack_msgs2::msg::Goal>("/SQ01/goal", 10);
 
         timer_ = this->create_wall_timer(
             std::chrono::duration<double>(dt_),
@@ -167,6 +168,7 @@ private:
         // Leader/follower positions (note here map and world are the same - TODO: go back and use consistent wording)
         Eigen::Vector3d leader_pos_world(L_pos.x, L_pos.y, L_pos.z);
         Eigen::Vector3d follower_pos_world(F_pos.x, F_pos.y, F_pos.z);
+        Eigen::Vector3d leader_vel_world(L_vel.x, L_vel.y, L_vel.z);
 
         // Offset in leader body frame: behind leader in T, and optionally lateral/vertical offsets
         Eigen::Vector3d desired_offset_tnb(
@@ -178,6 +180,13 @@ private:
         // desired position of the follower in the world frame
         Eigen::Vector3d desired_p_follower = leader_pos_world + L_q * desired_offset_tnb;
 
+        RCLCPP_INFO_THROTTLE(
+            this->get_logger(),
+            *this->get_clock(),
+            1000,
+            "Desired offset stnb (%.2f, %.2f, %.2f) , LQ (%.2f, %.2f, %.2f)",
+            desired_offset_tnb.x(), desired_offset_tnb.y(), desired_offset_tnb.z(),
+            L_q.w(), L_q.x(), L_q.y(), L_q.z());
 
         // Relative displacement from follower to leader in world
         Eigen::Vector3d rel_world = follower_pos_world - leader_pos_world;
@@ -200,8 +209,14 @@ private:
 
         Eigen::Vector3d v_TNB(uT,uN,uB);
         double norm = v_TNB.norm();
-        if (norm > u_follower_max_) {
-            v_TNB *= (u_follower_max_ / norm);
+        norm = std::fabs(norm);
+        if (norm > u_follower_max_ && norm  > 1e-9) {
+            if(norm > 1) {
+                v_TNB *= (u_follower_max_ / norm);
+            }
+            else {
+                 v_TNB *= (u_follower_max_ * norm);
+            }
         }
         // Get velocity back into world frame
         Eigen::Vector3d v_world = L_q * v_TNB;

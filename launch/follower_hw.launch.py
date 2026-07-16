@@ -26,13 +26,13 @@ def generate_launch_description():
 
     # Define node 
     follower_trajectory_node = Node(
-        package='trajectory_generator_ros2',
+        package='trajectory_generator_ros2_unrep',
         namespace=namespace,
-        executable='follower_traj_generator2',
-        name='follower_traj_generator2',
+        executable='follower_traj_gen_hw',
+        name='follower_traj_gen_hw',
         output='screen',
         parameters=[os.path.join(
-            get_package_share_directory('trajectory_generator_ros2'),
+            get_package_share_directory('trajectory_generator_ros2_unrep'),
             'config',
             'follower_behavior_hw.yaml'
         )]

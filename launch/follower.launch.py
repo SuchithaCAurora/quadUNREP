@@ -26,7 +26,7 @@ def generate_launch_description():
 
     # Define node 
     follower_trajectory_node = Node(
-        package='trajectory_generator_ros2',
+        package='trajectory_generator_ros2_unrep',
         namespace=namespace,
         executable='follower_traj_generator2',
         name='follower_traj_generator2',

@@ -1,16 +1,16 @@
-PX04:
-  follower_traj_generator2:
+PX03:
+  follower_traj_gen_hw:
     ros__parameters:
       follower_mode: "heading_based"
       follower_distance_T: 0.0 # positive means behind leader
       follower_distance_N: 0.0 # positive means to the right
-      follower_distance_B: 1.0 # positive means above
+      follower_distance_B: 1.5 # positive means above
       publish_freq: 100.0
-      leader_topic_pos: "/PX03/world"
-      leader_topic_vel: "/PX03/mocap/twist"
+      leader_topic_pos: "/PX01/world"
+      leader_topic_vel: "/PX01/mocap/twist"
       follower_topic: "world" # PROVIDE TOPIC WITHOUT NAMESPACED
       goal_altitude: 3.0
-      max_speed: 4.0
-      init_follower_offset: [0.0, 3.0, 0.0]
+      max_speed: 0.5      
+      init_follower_offset: [0.0, 0.0, 0.0]
       tuning_param: 10.0
       deadzone_vctrl: 0.05
