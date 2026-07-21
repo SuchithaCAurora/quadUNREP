@@ -8,6 +8,7 @@
 #include <mavros_msgs/msg/state.hpp>
 
 #include <Eigen/Geometry>
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -35,6 +36,10 @@ public:
         this->declare_parameter<double>("leader_vel_timeout", 0.3);
         this->declare_parameter<std::string>("mavros_state_topic", "mavros/state");
         this->declare_parameter<double>("divergence_thresh", 1.0);
+        this->declare_parameter<double>("yaw_max_rate", 1.0);
+        this->declare_parameter<double>("yaw_max_accel", 2.0);
+        this->declare_parameter<double>("yaw_deadband", 0.02);
+        this->declare_parameter<double>("yaw_divergence_thresh", 0.3);
 
         this->declare_parameter<std::vector<double>>("init_follower_offset", {0.0, 3.0, 0.0});
 
@@ -54,6 +59,10 @@ public:
         this->get_parameter("leader_vel_timeout", leader_vel_timeout_);
         this->get_parameter("mavros_state_topic", mavros_state_topic_);
         this->get_parameter("divergence_thresh", divergence_thresh_);
+        this->get_parameter("yaw_max_rate", yaw_max_rate_);
+        this->get_parameter("yaw_max_accel", yaw_max_accel_);
+        this->get_parameter("yaw_deadband", yaw_deadband_);
+        this->get_parameter("yaw_divergence_thresh", yaw_divergence_thresh_);
 
         double publish_freq;
         this->get_parameter("publish_freq", publish_freq);
@@ -67,6 +76,13 @@ public:
                 "max_accel=%.2f is below wn*v_max/4=%.2f. Expect overshoot on capture. "
                 "Lower filter_wn to <= %.2f or lower max_speed.",
                 a_max_, a_required, 4.0 * a_max_ / v_max_);
+        }
+
+        const double yaw_a_required = wn_ * yaw_max_rate_ / 4.0;
+        if (yaw_max_accel_ < yaw_a_required) {
+            RCLCPP_WARN(this->get_logger(),
+                "yaw_max_accel=%.2f is below wn*yaw_max_rate/4=%.2f. Expect overshoot on yaw capture.",
+                yaw_max_accel_, yaw_a_required);
         }
 
         if (follower_mode_ != "velocity_based" && follower_mode_ != "heading_based") {
@@ -147,6 +163,19 @@ private:
         return (n > lim && n > 1e-9) ? (v * (lim / n)) : v;
     }
 
+    static double clip1D(double v, double lim)
+    {
+        return std::max(-lim, std::min(lim, v));
+    }
+
+    // Wrap to (-pi, pi]
+    static double wrapAngle(double a)
+    {
+        while (a > M_PI)  a -= 2.0 * M_PI;
+        while (a <= -M_PI) a += 2.0 * M_PI;
+        return a;
+    }
+
     void pubCB()
     {
         if (!has_leader_ || !has_follower_ || !has_leader_vel_) {
@@ -164,12 +193,13 @@ private:
         Eigen::Vector3d follower_pos_world(F_pos.x, F_pos.y, F_pos.z);
         Eigen::Vector3d leader_vel_world(L_vel.x, L_vel.y, L_vel.z);
 
-        // Stale leader velocity -> treat as zero rather than extrapolating
+        // Stale leader velocity -> feedforward ramps to zero below rather than
+        // extrapolating (see leader_vel_ff_ update).
         const double vel_age = (this->now() - last_leader_vel_time_).seconds();
-        if (vel_age > leader_vel_timeout_) {
-            leader_vel_world.setZero();
+        const bool vel_fresh = vel_age <= leader_vel_timeout_;
+        if (!vel_fresh) {
             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                "Leader velocity stale (%.2f s).", vel_age);
+                "Leader velocity stale (%.2f s). Ramping feedforward to zero.", vel_age);
         }
 
         Eigen::Vector3d desired_offset_tnb(
@@ -186,6 +216,7 @@ private:
         // mode switch, so we keep publishing.
         if (!has_mavros_state_ || !offboard_now_) {
             sp_init_ = false;
+            leader_vel_ff_.setZero();
 
             snapstack_msgs2::msg::Goal hold;
             hold.header.stamp = this->now();
@@ -193,7 +224,8 @@ private:
             hold.v.x = 0.0; hold.v.y = 0.0; hold.v.z = 0.0;
             hold.a.x = 0.0; hold.a.y = 0.0; hold.a.z = 0.0;
             hold.j.x = 0.0; hold.j.y = 0.0; hold.j.z = 0.0;
-            hold.psi  = quat2yaw(L_qmsg);
+            // Hold at the follower's own current heading, not the leader's.
+            hold.psi  = quat2yaw(follower_pos_.pose.orientation);
             hold.dpsi = 0.0;
             hold.power   = true;
             hold.mode_xy = snapstack_msgs2::msg::Goal::MODE_POSITION_CONTROL;
@@ -205,36 +237,77 @@ private:
             return;
         }
 
+        const double follower_yaw_actual = quat2yaw(follower_pos_.pose.orientation);
+
         // ---- Second-order setpoint filter ----
         if (!sp_init_) {
             sp_ = follower_pos_world;
             sp_vel_.setZero();
+            psi_sp_ = follower_yaw_actual;
+            psi_rate_sp_ = 0.0;
             sp_init_ = true;
             RCLCPP_INFO(this->get_logger(),
-                "Filter initialized at (%.2f, %.2f, %.2f)",
-                sp_.x(), sp_.y(), sp_.z());
-        } else if ((sp_ - follower_pos_world).norm() > divergence_thresh_) {
-            // Filter state has drifted too far from the actual vehicle position
-            // (missed re-init edge, long dropout, etc.) -- snap back rather than
-            // fly the accumulated error.
-            RCLCPP_WARN(this->get_logger(),
-                "Filter diverged from actual position by %.2f m (> %.2f m). Re-initializing.",
-                (sp_ - follower_pos_world).norm(), divergence_thresh_);
-            sp_ = follower_pos_world;
-            sp_vel_.setZero();
+                "Filter initialized at (%.2f, %.2f, %.2f), yaw %.2f",
+                sp_.x(), sp_.y(), sp_.z(), psi_sp_);
+        } else {
+            if ((sp_ - follower_pos_world).norm() > divergence_thresh_) {
+                // Filter state has drifted too far from the actual vehicle position
+                // (missed re-init edge, long dropout, etc.) -- snap back rather than
+                // fly the accumulated error.
+                RCLCPP_WARN(this->get_logger(),
+                    "Filter diverged from actual position by %.2f m (> %.2f m). Re-initializing.",
+                    (sp_ - follower_pos_world).norm(), divergence_thresh_);
+                sp_ = follower_pos_world;
+                sp_vel_.setZero();
+            }
+            const double yaw_div = std::fabs(wrapAngle(psi_sp_ - follower_yaw_actual));
+            if (yaw_div > yaw_divergence_thresh_) {
+                RCLCPP_WARN(this->get_logger(),
+                    "Yaw filter diverged from actual heading by %.2f rad (> %.2f rad). Re-initializing.",
+                    yaw_div, yaw_divergence_thresh_);
+                psi_sp_ = follower_yaw_actual;
+                psi_rate_sp_ = 0.0;
+            }
         }
+
+        // Leader velocity feedforward, rate-limited by a_max_ toward either the live
+        // reading or zero when stale -- a fresh/stale transition is absorbed by the
+        // same acceleration limit as the rest of the filter instead of stepping
+        // goal.v. Feeding it into the damping term (rather than adding it to sp_vel_
+        // only at publish time) makes the filter critically damp on velocity error
+        // relative to the leader, which removes the steady-state lag structurally:
+        // at convergence sp_vel_ settles to leader_vel_ff_, not to zero.
+        const Eigen::Vector3d vel_ff_target = vel_fresh ? leader_vel_world : Eigen::Vector3d::Zero();
+        Eigen::Vector3d dv_ff = vel_ff_target - leader_vel_ff_;
+        dv_ff = clipNorm(dv_ff, a_max_ * dt_);
+        leader_vel_ff_ += dv_ff;
 
         Eigen::Vector3d err = target - sp_;
         if (err.norm() < deadband_) {
             err.setZero();
         }
 
-        Eigen::Vector3d a_cmd = wn_ * wn_ * err - 2.0 * wn_ * sp_vel_;
+        Eigen::Vector3d a_cmd = wn_ * wn_ * err - 2.0 * wn_ * (sp_vel_ - leader_vel_ff_);
         a_cmd = clipNorm(a_cmd, a_max_);
 
         sp_vel_ += a_cmd * dt_;
         sp_vel_  = clipNorm(sp_vel_, v_max_);
         sp_     += sp_vel_ * dt_;
+        // --------------------------------------
+
+        // ---- Second-order yaw filter (same law, scalar, wrapped) ----
+        const double psi_target = quat2yaw(L_qmsg);
+        double yaw_err = wrapAngle(psi_target - psi_sp_);
+        if (std::fabs(yaw_err) < yaw_deadband_) {
+            yaw_err = 0.0;
+        }
+
+        double yaw_a_cmd = wn_ * wn_ * yaw_err - 2.0 * wn_ * psi_rate_sp_;
+        yaw_a_cmd = clip1D(yaw_a_cmd, yaw_max_accel_);
+
+        psi_rate_sp_ += yaw_a_cmd * dt_;
+        psi_rate_sp_  = clip1D(psi_rate_sp_, yaw_max_rate_);
+        psi_sp_       = wrapAngle(psi_sp_ + psi_rate_sp_ * dt_);
         // --------------------------------------
 
         snapstack_msgs2::msg::Goal goal;
@@ -256,8 +329,8 @@ private:
         goal.j.y = 0.0;
         goal.j.z = 0.0;
 
-        goal.psi  = quat2yaw(L_qmsg);
-        goal.dpsi = 0.0;
+        goal.psi  = psi_sp_;
+        goal.dpsi = psi_rate_sp_;
 
         goal.power   = true;
         goal.mode_xy = snapstack_msgs2::msg::Goal::MODE_POSITION_CONTROL;
@@ -308,6 +381,7 @@ private:
     // Filter state
     Eigen::Vector3d sp_{Eigen::Vector3d::Zero()};
     Eigen::Vector3d sp_vel_{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d leader_vel_ff_{Eigen::Vector3d::Zero()};
     bool sp_init_{false};
 
     // Offboard gating (mavros/state: armed + mode == "OFFBOARD")
@@ -316,6 +390,14 @@ private:
     bool offboard_prev_{false};
     std::string mavros_state_topic_;
     double divergence_thresh_;
+
+    // Yaw filter state (same critically-damped law as position, scalar + wrapped)
+    double psi_sp_{0.0};
+    double psi_rate_sp_{0.0};
+    double yaw_max_rate_;
+    double yaw_max_accel_;
+    double yaw_deadband_;
+    double yaw_divergence_thresh_;
 
     double v_max_;
     double a_max_;
