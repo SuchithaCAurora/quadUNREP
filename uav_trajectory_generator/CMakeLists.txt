@@ -30,6 +30,7 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(snapstack_msgs2 REQUIRED)
+find_package(mavros_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -161,7 +162,8 @@ ament_target_dependencies(follower_traj_gen_hw
   std_msgs
   geometry_msgs
   snapstack_msgs2
-  Eigen3 
+  mavros_msgs
+  Eigen3
 )
 
 ament_target_dependencies(goal_visualizer
