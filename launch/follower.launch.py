@@ -32,7 +32,7 @@ def generate_launch_description():
         name='follower_traj_generator2',
         output='screen',
         parameters=[os.path.join(
-            get_package_share_directory('trajectory_generator_ros2'),
+            get_package_share_directory('trajectory_generator_ros2_unrep'),
             'config',
             'follower_behavior.yaml'
         )]

@@ -9,6 +9,7 @@
 #include <string>
 
 #include <iostream>
+#include <algorithm>
 
 // Uncomment if using transforms
 // #include <rclcpp/rclcpp.hpp>
@@ -115,6 +116,92 @@ private:
         has_follower_ = true;
     }
 
+    snapstack_msgs2::msg::Goal simpleInterpolation(const Eigen::Vector3d& current_pos,double current_psi,
+        const Eigen::Vector3d& current_vel, const snapstack_msgs2::msg::Goal& dest_pos, double dest_yaw, const Eigen::Vector3d& desired_vel, double vel_yaw,
+        double dist_thresh, double yaw_thresh, double dt, bool& finished)
+    {
+        // this requires having the goal in the world frame and current position in the world frame
+        // also the velocities in the world frame
+        snapstack_msgs2::msg::Goal goal;
+        // interpolate from current goal pos to the initial goal pos
+        double Dx = dest_pos.p.x - current_pos.x();
+        double Dy = dest_pos.p.y - current_pos.y();
+        double dist = sqrt(Dx*Dx + Dy*Dy);
+        double delta_yaw = dest_yaw - current_psi;
+        delta_yaw = wrap(delta_yaw);
+
+        bool dist_far = dist > dist_thresh;
+        bool yaw_far  = fabs(delta_yaw) > yaw_thresh;
+        finished = not dist_far and not yaw_far;  // both are close
+
+        double accel_for_vel = 0.1;
+
+        goal.p.z = dest_pos.p.z;  // this should be alt_ and the altitude where the drone took off too
+        // are we too far from the dest?
+        if(dist_far){
+            double c = Dx/dist; // separation displacement (component of unit vector)
+            double s = Dy/dist; // separation displacement (component of unit vector)
+
+            goal.p.x = current_pos.x() + c*std::fabs(desired_vel.x())*dt; //TODO: fix this logic: what does vel actually mean here?
+            // TODO: in Kota's code, vel is a double -- what does that mean?
+            goal.p.y = current_pos.y() + s*std::fabs(desired_vel.y())*dt; // the sign is already baked into the separation displacement variables, so take fabs to get speed rather than velocity
+            RCLCPP_INFO(
+            this->get_logger(),
+            "goal x value (%.2f) , goal y (%.2f), desired x (%.2f), desired y (%.2f)",
+            goal.p.x, goal.p.y, dest_pos.p.x, dest_pos.p.y);
+            // make the vel ref smooth
+            // old lines are:
+                //goal.v.x = c*vel;
+                //goal.v.y = s*vel;
+            RCLCPP_INFO(
+            this->get_logger(),
+            "c (%.2f) , s (%.2f)",
+            c, s);
+            goal.v.x = std::min(current_vel.x() + accel_for_vel*dt, c*desired_vel.x()); // this portion no longer makes sense - c and s extract out components of total velocity
+            goal.v.y = std::min(current_vel.y() + accel_for_vel*dt, s*desired_vel.y());
+            RCLCPP_INFO(
+            this->get_logger(),
+            "vx (%.2f) , vy (%.2f)",
+            goal.v.x, goal.v.y);
+            // RCLCPP_INFO(
+            // this->get_logger(),
+            // "x_vel value (%.2f) , y_vel (%.2f)",
+            // goal.v.x, goal.v.y);
+            // RCLCPP_INFO(
+            // this->get_logger(),
+            // "c value (%.2f) , s (%.2f)",
+            // c, s);
+        }else{
+            goal.p.x = dest_pos.p.x;
+            goal.p.y = dest_pos.p.y;
+
+            // make the vel ref smooth
+            // old lines are:
+                //goal.v.x = 0;
+                //goal.v.y = 0;
+            
+            goal.v.x = std::max(0.0, current_vel.x() - accel_for_vel*dt);
+            goal.v.y = std::max(0.0, current_vel.y() - accel_for_vel*dt);
+            
+        }
+        // is the yaw close enough to the desired?
+        if(yaw_far){
+            int sgn = delta_yaw >= 0? 1 : -1;
+            vel_yaw = sgn*vel_yaw;  // ccw or cw, the smallest angle
+            goal.psi = current_psi + vel_yaw*dt;
+            goal.dpsi = vel_yaw;
+        }else{
+            goal.psi = dest_yaw;
+            goal.dpsi = 0;
+        }
+
+        // Remember to set power
+        goal.power = true;
+
+        return goal;
+    }
+
+
     // Publish the goal for the follower
     void pubCB()
     {
@@ -127,7 +214,8 @@ private:
         const auto& L_vel = leader_odom_.twist.twist.linear;
 
         const auto& F_pos = follower_odom_.pose.pose.position;
-
+        const auto& F_qmsg = follower_odom_.pose.pose.orientation;
+        const auto& F_vel = follower_odom_.twist.twist.linear;
         // if both L_pos and F_pos are in same global frame:
             // Eigen::Vector3d desired_offset_world = L_q * desired_offset_tnb
             // Eigen::Vector3d desired_p_follower = leader_pos_world + desired_offset_world
@@ -149,6 +237,7 @@ private:
             // then use this transform for multiplication with vectors
 
         Eigen::Quaterniond L_q = quatFromMsg(L_qmsg);
+        Eigen::Quaterniond F_q = quatFromMsg(F_qmsg);
 
         // Leader/follower positions (note here map and world are the same - TODO: go back and use consistent wording)
         Eigen::Vector3d leader_pos_world(L_pos.x, L_pos.y, L_pos.z);
@@ -181,6 +270,8 @@ private:
 
         // Leader velocity (note that odom twist message is expressed in childe_frame_id)
         Eigen::Vector3d leader_vel_tnb(L_vel.x, L_vel.y, L_vel.z);
+        Eigen::Vector3d follower_vel_tnb(F_vel.x, F_vel.y, F_vel.z);
+        Eigen::Vector3d follower_vel_world = F_q * follower_vel_tnb;
         // Eigen::Vector3d leader_vel_tnb = L_q.inverse() * leader_vel_world; // use this if the linear velocity message was in map frame
 
         double sT = applyDeadband(e_form.x(), deadband_);
@@ -192,11 +283,17 @@ private:
 
         Eigen::Vector3d v_TNB(uT,uN,uB);
         double norm = v_TNB.norm();
-        if (norm > u_follower_max_) {
-            v_TNB *= (u_follower_max_ / norm);
+        norm = std::fabs(norm);
+        if (norm > u_follower_max_ && norm  > 1e-9) {
+            if(norm > 1) {
+                v_TNB *= (u_follower_max_ / norm);
+            }
+            else {
+                 v_TNB *= (u_follower_max_ * norm);
+            }
         }
         // Get velocity back into world frame
-        Eigen::Vector3d v_world = L_q * v_TNB;
+        Eigen::Vector3d v_world_desired = L_q * v_TNB;
 
         snapstack_msgs2::msg::Goal goal;
         goal.header.stamp = this->now();
@@ -208,13 +305,9 @@ private:
 
         // accel / jerk can be zero for now
 
-        // goal.v.x = 0.0;//
-        // goal.v.y = 0.0;//
-        // goal.v.z = 0.0;//
-
-        goal.v.x = v_world.x();
-        goal.v.y = v_world.y();
-        goal.v.z = v_world.z();
+        goal.v.x = v_world_desired.x();
+        goal.v.y = v_world_desired.y();
+        goal.v.z = v_world_desired.z();
 
         goal.a.x = 0.0;
         goal.a.y = 0.0;
@@ -227,20 +320,21 @@ private:
         // same yaw as leader
         goal.psi = quat2yaw(L_qmsg);
         goal.dpsi = 0.0;
-
+        goal.mode_xy = snapstack_msgs2::msg::Goal::MODE_VELOCITY_CONTROL;
+        goal.mode_z = snapstack_msgs2::msg::Goal::MODE_VELOCITY_CONTROL;
         goal.power = true;
-        goal.mode_xy = snapstack_msgs2::msg::Goal::MODE_POSITION_CONTROL;
-        goal.mode_z = snapstack_msgs2::msg::Goal::MODE_POSITION_CONTROL;
+        bool finished; 
+        
+        snapstack_msgs2::msg::Goal goal_int;
+        double desired_const_vel = 0.4;
+ 
 
         goal_pub_->publish(goal);
-
-        RCLCPP_INFO_THROTTLE(
+        RCLCPP_INFO(
             this->get_logger(),
-            *this->get_clock(),
-            1000,
-            "Leader (%.2f, %.2f, %.2f) -> Goal (%.2f, %.2f, %.2f)",
-            L_pos.x, L_pos.y, L_pos.z,
-            goal.p.x, goal.p.y, goal.p.z);
+            "velocities (%.2f, %.2f, %.2f) -> norm (%.2f)",
+            goal.v.x, goal.v.y, goal.v.z,
+            v_TNB.norm());
     }
 
     double quat2yaw(const geometry_msgs::msg::Quaternion& q)
@@ -255,6 +349,15 @@ private:
         Eigen::Quaterniond q(qmsg.w, qmsg.x, qmsg.y, qmsg.z);
         q.normalize();
         return q;
+    }
+
+    double wrap(double val)
+    {
+    if(val > M_PI)
+        val -= 2.0*M_PI;
+    if(val < -M_PI)
+        val += 2.0*M_PI;
+    return val;
     }
 
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr leader_state_sub_;
@@ -284,6 +387,8 @@ private:
     std::vector<double> init_follower_offset_;
     double p_tuning_;
     double deadband_;
+    double dist_threshold_{0.5};
+    double yaw_threshold_{0.5};
 
 };
 

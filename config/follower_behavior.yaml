@@ -8,8 +8,8 @@ SQ02:
       publish_freq: 100.0
       leader_topic: "/SQ01/mavros/local_position/odom"
       goal_altitude: 3.0
-      max_speed: 4.0
+      max_speed: 6.0
       init_follower_offset: [0.0, 3.0, 0.0]
-      tuning_param: 10.0
-      deadzone_vctrl: 0.05
+      tuning_param: 1000.0
+      deadzone_vctrl: 0.25
       follower_topic: "mavros/local_position/odom" # PROVIDE TOPIC WITHOUT NAMESPACED
