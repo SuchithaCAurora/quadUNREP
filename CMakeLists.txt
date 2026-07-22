@@ -39,9 +39,6 @@ find_package(tf2_geometry_msgs REQUIRED)
 ###########
 
 ## Declare cpp executables
-add_executable(${PROJECT_NAME}
-  src/trajectory_generator_node.cpp
-)
 
 add_executable(follower_traj_generator
   src/follower_trajectory_node.cpp
@@ -58,10 +55,14 @@ add_executable(follower_traj_gen_hw
 add_executable(goal_visualizer
   src/goal_visualizer.cpp
 )
+
+add_executable(trajectory_generator_ros2
+  src/trajectory_generator_node.cpp
+)
 ################## Replacing catkin_package() ####################
 
 ## Declare a cpp library
-add_library(${PROJECT_NAME}_core
+add_library(trajectory_generator_ros2_core
   src/TrajectoryGenerator.cpp
   src/trajectories/Circle.cpp
   src/trajectories/Line.cpp
@@ -77,7 +78,7 @@ add_library(${PROJECT_NAME}_core
 
 # ROS2:
 # Replaces INCLUDE_DIRS keyword of catkin_package() call
-target_include_directories(${PROJECT_NAME} PUBLIC
+target_include_directories(trajectory_generator_ros2 PUBLIC
    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
   ${EIGEN3_INCLUDE_DIR})
@@ -101,6 +102,7 @@ target_include_directories(goal_visualizer PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
   ${EIGEN3_INCLUDE_DIR})
+
 ## Specify libraries to link executable targets against
 #target_link_libraries(${PROJECT_NAME}_core
 #  ${catkin_LIBRARIES}
@@ -124,7 +126,7 @@ ${catkin_INCLUDE_DIRS}
 ${EIGEN3_INCLUDE_DIR}
 )
 
-ament_target_dependencies(${PROJECT_NAME} 
+ament_target_dependencies(trajectory_generator_ros2 
   rclcpp 
   snapstack_msgs2
   std_msgs
@@ -132,7 +134,7 @@ ament_target_dependencies(${PROJECT_NAME}
   Eigen3
 )
 
-ament_target_dependencies(${PROJECT_NAME}_core 
+ament_target_dependencies(trajectory_generator_ros2_core 
   rclcpp
   std_msgs
   geometry_msgs
@@ -182,7 +184,8 @@ ament_target_dependencies(goal_visualizer
 #   LIBRARY DESTINATION lib
 #   RUNTIME DESTINATION lib/${PROJECT_NAME} 
 # )
-install(TARGETS ${PROJECT_NAME} 
+install(TARGETS 
+  trajectory_generator_ros2
   follower_traj_generator2
   goal_visualizer
   follower_traj_gen_hw
