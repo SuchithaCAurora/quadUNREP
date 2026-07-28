@@ -3,13 +3,42 @@ SQ02:
     ros__parameters:
       follower_mode: "heading_based"
       follower_distance_T: 0.0 # positive means behind leader
-      follower_distance_N: 0.0 # positive means to the right
-      follower_distance_B: 1.0 # positive means above
+      follower_distance_N: 3.0 # positive means to the right
+      follower_distance_B: 0.0 # positive means above
       publish_freq: 100.0
       leader_topic: "/SQ01/mavros/local_position/odom"
       goal_altitude: 3.0
-      max_speed: 6.0
+      max_speed: 1.5
       init_follower_offset: [0.0, 3.0, 0.0]
-      tuning_param: 1000.0
+      tuning_param: 1.0
       deadzone_vctrl: 0.25
       follower_topic: "mavros/local_position/odom" # PROVIDE TOPIC WITHOUT NAMESPACED
+
+      # ====================================================================
+      # Shared settings
+      # ====================================================================
+      alt:       1.8      # [m]  absolute takeoff altitude (world frame z)
+
+      # ====================================================================
+      # Takeoff / landing / mode-transition speeds (all shared)
+      # ====================================================================
+      vel_initpos:   0.4   # [m/s] horizontal speed flying to the trajectory's
+                           #       initial point after hover
+      vel_take:      0.3   # [m/s] vertical climb speed during takeoff
+      vel_land_fast: 0.35  # [m/s] vertical descent speed until near ground
+      vel_land_slow: 0.04  # [m/s] vertical speed for the final touchdown
+      vel_yaw:       0.2   # [rad/s] slew rate when aligning yaw
+
+      margin_takeoff_outside_bounds: 0.05  # [m] extra slack around the
+                                           #     room-bounds check at takeoff
+
+      # ====================================================================
+      # Room bounds — a trajectory whose waypoints fall outside this box
+      # will be refused at startup.
+      # ====================================================================
+      x_min: -5.0   # [m]
+      x_max:  5.0   # [m]
+      y_min: -5.0   # [m]
+      y_max:  5.0   # [m]
+      z_min: -5.0   # [m]
+      z_max:  5.0   # [m]
