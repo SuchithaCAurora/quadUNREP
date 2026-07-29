@@ -203,13 +203,14 @@ def main():
     ax_anim.set_title('Figure8 flight: nominal vs. CBF-avoided')
 
     # mplot3d has no real blitting -- every frame is a full-canvas redraw
-    # (~50 ms each measured locally), so animating the whole ~110 s mission
-    # is ~2700 frames / ~2-3 min just to render. A repeating Figure8 re-passes
-    # the same obstacle every loop (15 separate encounters here, every 5-10s)
-    # -- padding and tiling *all* of them ends up covering most of the
-    # mission again. What's actually useful for tuning is watching one
-    # avoidance maneuver closely, so animate only the single closest-approach
-    # encounter (set `encounter_choice` below to inspect a different pass).
+    # (~50 ms each measured locally). 'encounter' mode animates just the
+    # single closest-approach pass (~10-20s render, best for tuning alpha1/
+    # alpha2). 'full_mission' animates the entire flight (~2700 frames even
+    # subsampled -> a couple minutes to render) for a complete flythrough --
+    # the static overview plot above already shows the whole mission's path
+    # instantly if you just want to see the shape, not watch it fly.
+    anim_view = 'encounter'  # 'encounter' or 'full_mission'
+
     pad_s = 2.0
     pad_k = int(pad_s / dt)
     dist_to_nearest_obs = np.min(
@@ -217,11 +218,17 @@ def main():
     encounter_mask = dist_to_nearest_obs < 1.5
     encounter_idx = np.flatnonzero(encounter_mask)
 
-    anim_step = 2  # 50 Hz playback is visually smooth; halves render time for free
-
-    if len(encounter_idx) == 0:
-        window_frames = list(range(0, len(t), 4))  # no encounters -- fall back to a coarse full-mission view
+    if anim_view == 'full_mission':
+        anim_step = 4  # coarser subsampling -- there's a lot more ground to cover
+        window_frames = list(range(0, len(t), anim_step))
+        est_s = len(window_frames) * 0.054
+        print(f"Animating full mission: {len(window_frames)} frames, "
+              f"est. render time ~{est_s:.0f}s ({est_s/60:.1f} min)")
+    elif len(encounter_idx) == 0:
+        anim_step = 4
+        window_frames = list(range(0, len(t), anim_step))  # no encounters -- fall back to full mission
     else:
+        anim_step = 2  # 50 Hz playback is visually smooth; halves render time for free
         gaps = np.flatnonzero(np.diff(encounter_idx) > pad_k)
         clusters = np.split(encounter_idx, gaps + 1)
 
