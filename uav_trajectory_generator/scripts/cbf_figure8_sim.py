@@ -95,45 +95,40 @@ def cbf_accel_projection(p, v, a_nom, obs_center, obs_radius, alpha1, alpha2):
     return a_nom - c * (margin / cc)
 
 
-def run_cbf_filter(p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, margin):
+def run_cbf_filter(p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, wn_track=6.0):
     """obstacles: list of {'center': np.array([x,y,z]), 'radius': r}.
-    Filter state only advances inside the influence radius of the nearest
-    obstacle; outside it, filtered state is pinned to nominal every step so
-    the vehicle re-converges onto the mission once clear (same logic as the
-    ROS node)."""
+
+    The filter continuously runs its own double-integrator state, driven by
+    a critically-damped PD tracker of the nominal reference (feedforward
+    a_nom plus position/velocity error correction) with the HOCBF projection
+    applied on top. Raw a_nom has no dependence on the filtered state, so
+    without the tracking term any CBF-induced deviation has zero restoring
+    force (error_ddot = 0) and never reconverges -- this is what produced the
+    runaway drift and the hard teleport on re-entry to nominal in the first
+    version. With the tracker, the filtered state naturally converges onto
+    and tracks the nominal trajectory whenever the constraint isn't binding,
+    so no discrete active/inactive state machine is needed at all."""
     N = len(p_nom)
     p_out, v_out, a_out = p_nom.copy(), v_nom.copy(), a_nom.copy()
     h_hist = np.full(N, np.nan)
 
     p_filt = p_nom[0].copy()
     v_filt = v_nom[0].copy()
-    active = False
 
     for k in range(N):
-        if not obstacles:
-            continue
+        a_track = a_nom[k] + wn_track ** 2 * (p_nom[k] - p_filt) + 2.0 * wn_track * (v_nom[k] - v_filt)
 
-        dists = [np.linalg.norm(p_nom[k] - o['center']) - o['radius'] for o in obstacles]
-        obs = obstacles[int(np.argmin(dists))]
-        infl = obs['radius'] + margin
-        dist_to_center = np.linalg.norm(p_nom[k] - obs['center'])
-
-        if not active:
-            if dist_to_center > infl:
-                p_filt, v_filt = p_nom[k].copy(), v_nom[k].copy()
-            else:
-                active = True
-
-        if active:
-            a_safe = cbf_accel_projection(p_filt, v_filt, a_nom[k],
+        a_safe = a_track
+        if obstacles:
+            dists = [np.linalg.norm(p_filt - o['center']) - o['radius'] for o in obstacles]
+            obs = obstacles[int(np.argmin(dists))]
+            a_safe = cbf_accel_projection(p_filt, v_filt, a_track,
                                            obs['center'], obs['radius'], alpha1, alpha2)
-            v_filt = v_filt + a_safe * dt
-            p_filt = p_filt + v_filt * dt
-            p_out[k], v_out[k], a_out[k] = p_filt, v_filt, a_safe
             h_hist[k] = np.linalg.norm(p_filt - obs['center']) ** 2 - obs['radius'] ** 2
 
-            if np.linalg.norm(p_filt - obs['center']) > infl:
-                active = False
+        v_filt = v_filt + a_safe * dt
+        p_filt = p_filt + v_filt * dt
+        p_out[k], v_out[k], a_out[k] = p_filt, v_filt, a_safe
 
     return p_out, v_out, a_out, h_hist
 
@@ -164,7 +159,7 @@ def main():
 
     # --- CBF params (mirrors cbf_safety_filter_node.cpp defaults) ---
     alpha1, alpha2 = 2.0, 2.0
-    influence_margin = 1.0
+    wn_track = 6.0  # tracking-error natural frequency; must reconverge faster than obstacle encounters recur
 
     # --- Obstacle(s): placed to intersect one lobe of the figure8 ---
     obstacles = [
@@ -173,7 +168,7 @@ def main():
 
     p_nom, v_nom, a_nom, t = generate_figure8(alt, r, cx, cy, v_goals, t_traj, accel, dt)
     p_safe, v_safe, a_safe, h_hist = run_cbf_filter(
-        p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, influence_margin)
+        p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, wn_track)
 
     # ---------------- static overview: 3D path + barrier value ----------------
     fig = plt.figure(figsize=(12, 6))
@@ -207,8 +202,37 @@ def main():
     ax_anim.legend()
     ax_anim.set_title('Figure8 flight: nominal vs. CBF-avoided')
 
-    step = 4  # subsample 100 Hz data for a watchable animation
-    frames = range(0, len(t), step)
+    # mplot3d has no real blitting -- every frame is a full-canvas redraw
+    # (~50 ms each measured locally), so animating the whole ~110 s mission
+    # is ~2700 frames / ~2-3 min just to render. A repeating Figure8 re-passes
+    # the same obstacle every loop (15 separate encounters here, every 5-10s)
+    # -- padding and tiling *all* of them ends up covering most of the
+    # mission again. What's actually useful for tuning is watching one
+    # avoidance maneuver closely, so animate only the single closest-approach
+    # encounter (set `encounter_choice` below to inspect a different pass).
+    pad_s = 2.0
+    pad_k = int(pad_s / dt)
+    dist_to_nearest_obs = np.min(
+        [np.linalg.norm(p_nom - obs['center'], axis=1) - obs['radius'] for obs in obstacles], axis=0)
+    encounter_mask = dist_to_nearest_obs < 1.5
+    encounter_idx = np.flatnonzero(encounter_mask)
+
+    anim_step = 2  # 50 Hz playback is visually smooth; halves render time for free
+
+    if len(encounter_idx) == 0:
+        window_frames = list(range(0, len(t), 4))  # no encounters -- fall back to a coarse full-mission view
+    else:
+        gaps = np.flatnonzero(np.diff(encounter_idx) > pad_k)
+        clusters = np.split(encounter_idx, gaps + 1)
+
+        encounter_choice = int(np.argmin([dist_to_nearest_obs[c].min() for c in clusters]))
+        chosen = clusters[encounter_choice]
+        lo = max(0, chosen[0] - pad_k)
+        hi = min(len(t), chosen[-1] + pad_k)
+        window_frames = list(range(lo, hi, anim_step))
+        print(f"Animating encounter #{encounter_choice+1}/{len(clusters)}: "
+              f"t=[{t[lo]:.2f}, {t[hi-1]:.2f}]s, {len(window_frames)} frames "
+              f"(closest approach {dist_to_nearest_obs[chosen].min():.2f} m from surface)")
 
     def update(k):
         nom_pt.set_data([p_nom[k, 0]], [p_nom[k, 1]])
@@ -217,7 +241,7 @@ def main():
         safe_pt.set_3d_properties([p_safe[k, 2]])
         return nom_pt, safe_pt
 
-    anim = FuncAnimation(fig2, update, frames=frames, interval=dt * step * 1000, blit=False)
+    anim = FuncAnimation(fig2, update, frames=window_frames, interval=dt * anim_step * 1000, blit=False)
 
     plt.show()
     return anim  # keep a reference so it isn't garbage-collected before show() runs
