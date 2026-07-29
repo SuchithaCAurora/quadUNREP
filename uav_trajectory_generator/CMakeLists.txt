@@ -59,6 +59,10 @@ add_executable(follower_traj_gen_hw
 add_executable(goal_visualizer
   src/goal_visualizer.cpp
 )
+
+add_executable(cbf_safety_filter
+  src/cbf_safety_filter_node.cpp
+)
 ################## Replacing catkin_package() ####################
 
 ## Declare a cpp library
@@ -99,6 +103,11 @@ target_include_directories(follower_traj_gen_hw PUBLIC
   ${EIGEN3_INCLUDE_DIR})
 
 target_include_directories(goal_visualizer PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+  ${EIGEN3_INCLUDE_DIR})
+
+target_include_directories(cbf_safety_filter PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
   ${EIGEN3_INCLUDE_DIR})
@@ -174,6 +183,14 @@ ament_target_dependencies(goal_visualizer
   tf2_geometry_msgs
 )
 
+ament_target_dependencies(cbf_safety_filter
+  rclcpp
+  std_msgs
+  geometry_msgs
+  snapstack_msgs2
+  Eigen3
+)
+
 # ROS2:
 # Replaces LIBRARIES keyword from catkin_package()
 # Mark executables and/or libraries for installation 
@@ -184,10 +201,11 @@ ament_target_dependencies(goal_visualizer
 #   LIBRARY DESTINATION lib
 #   RUNTIME DESTINATION lib/${PROJECT_NAME} 
 # )
-install(TARGETS ${PROJECT_NAME} 
+install(TARGETS ${PROJECT_NAME}
   follower_traj_generator2
   goal_visualizer
   follower_traj_gen_hw
+  cbf_safety_filter
   EXPORT export_package
   ARCHIVE DESTINATION lib 
   LIBRARY DESTINATION lib
