@@ -145,6 +145,21 @@ def plot_sphere(ax, center, radius, color='r'):
     ax.plot_surface(x, y, z, color=color, alpha=0.3, linewidth=0)
 
 
+def set_axes_equal_3d(ax):
+    """mplot3d scales each axis independently to fill the plot box, so a
+    true sphere renders squashed into a capsule/ellipsoid whenever the data
+    ranges differ per axis (exactly the case here: the Figure8 spans ~7m in
+    x/y but only ~1-1.5m in z). Force equal 1:1:1 scaling so obstacle spheres
+    actually look round. Must be called after all plotting on this axes."""
+    limits = np.array([ax.get_xlim3d(), ax.get_ylim3d(), ax.get_zlim3d()])
+    centers = limits.mean(axis=1)
+    radius = 0.5 * np.max(limits[:, 1] - limits[:, 0])
+    ax.set_xlim3d([centers[0] - radius, centers[0] + radius])
+    ax.set_ylim3d([centers[1] - radius, centers[1] + radius])
+    ax.set_zlim3d([centers[2] - radius, centers[2] + radius])
+    ax.set_box_aspect((1, 1, 1))
+
+
 # ============================================================================
 # Main
 # ============================================================================
@@ -180,6 +195,7 @@ def main():
     ax3d.set_xlabel('x [m]'); ax3d.set_ylabel('y [m]'); ax3d.set_zlabel('z [m]')
     ax3d.set_title('Nominal vs. safety-filtered trajectory')
     ax3d.legend()
+    set_axes_equal_3d(ax3d)
 
     axh = fig.add_subplot(1, 2, 2)
     axh.plot(t, h_hist)
@@ -201,6 +217,7 @@ def main():
     ax_anim.set_xlabel('x [m]'); ax_anim.set_ylabel('y [m]'); ax_anim.set_zlabel('z [m]')
     ax_anim.legend()
     ax_anim.set_title('Figure8 flight: nominal vs. CBF-avoided')
+    set_axes_equal_3d(ax_anim)
 
     # mplot3d has no real blitting -- every frame is a full-canvas redraw
     # (~50 ms each measured locally). 'encounter' mode animates just the
