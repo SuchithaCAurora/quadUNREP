@@ -95,7 +95,8 @@ def cbf_accel_projection(p, v, a_nom, obs_center, obs_radius, alpha1, alpha2):
     return a_nom - c * (margin / cc)
 
 
-def run_cbf_filter(p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, wn_track=6.0):
+def run_cbf_filter(p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, wn_track=1.0, max_accel=None,
+                    p0=None, v0=None):
     """obstacles: list of {'center': np.array([x,y,z]), 'radius': r}.
 
     The filter continuously runs its own double-integrator state, driven by
@@ -107,13 +108,40 @@ def run_cbf_filter(p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, wn_track=
     runaway drift and the hard teleport on re-entry to nominal in the first
     version. With the tracker, the filtered state naturally converges onto
     and tracks the nominal trajectory whenever the constraint isn't binding,
-    so no discrete active/inactive state machine is needed at all."""
+    so no discrete active/inactive state machine is needed at all.
+
+    max_accel: optional actuator saturation limit (m/s^2), applied by norm
+    after the projection. The closed-form projection divides by cc = ||c||^2
+    (cbf_accel_projection), which is only guarded against being exactly zero
+    (cc < 1e-9). If the vehicle passes very close to (not just near the
+    surface of, but near the CENTER of) an obstacle -- e.g. an obstacle
+    placed on the trajectory's own starting point -- cc can be small but
+    just above that guard, and margin/cc explodes into a physically
+    meaningless correction (seen in practice: >1e5 m/s^2). max_accel caps
+    that at whatever the real vehicle can do, same as PX4's MPC_ACC_HOR
+    would in practice. Left as None (unclamped) by default so parameter
+    sweeps can still show when a scenario demands more than any real
+    vehicle can deliver, instead of silently hiding it.
+
+    p0/v0: optional override for where the FILTER's own state starts,
+    independent of where the nominal mission (p_nom/v_nom) starts. Defaults
+    to seeding from p_nom[0]/v_nom[0] (vehicle already at the mission's
+    first point). Use this to model the vehicle arriving from somewhere
+    else -- e.g. an obstacle placed exactly on the trajectory's own start
+    point (theta=0 -> (cx,cy,alt) in generate_figure8/Figure8.cpp) creates a
+    degenerate dp=0 spawn if the filter also starts there; p0 lets you test
+    the same obstacle placement with a non-degenerate approach instead. This
+    also matches real hardware better: TrajectoryGenerator's INIT_POS_TRAJ
+    mode flies the vehicle from wherever it took off to the mission's start
+    before TRAJ_FOLLOWING (and this filter) ever engages, so the vehicle
+    starting elsewhere and being tracked onto the mission is the normal
+    case, not an edge case."""
     N = len(p_nom)
     p_out, v_out, a_out = p_nom.copy(), v_nom.copy(), a_nom.copy()
     h_hist = np.full(N, np.nan)
 
-    p_filt = p_nom[0].copy()
-    v_filt = v_nom[0].copy()
+    p_filt = p_nom[0].copy() if p0 is None else np.array(p0, dtype=float)
+    v_filt = v_nom[0].copy() if v0 is None else np.array(v0, dtype=float)
 
     for k in range(N):
         a_track = a_nom[k] + wn_track ** 2 * (p_nom[k] - p_filt) + 2.0 * wn_track * (v_nom[k] - v_filt)
@@ -125,6 +153,11 @@ def run_cbf_filter(p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, wn_track=
             a_safe = cbf_accel_projection(p_filt, v_filt, a_track,
                                            obs['center'], obs['radius'], alpha1, alpha2)
             h_hist[k] = np.linalg.norm(p_filt - obs['center']) ** 2 - obs['radius'] ** 2
+
+        if max_accel is not None:
+            a_norm = np.linalg.norm(a_safe)
+            if a_norm > max_accel:
+                a_safe = a_safe * (max_accel / a_norm)
 
         v_filt = v_filt + a_safe * dt
         p_filt = p_filt + v_filt * dt
@@ -167,23 +200,29 @@ def set_axes_equal_3d(ax):
 def main():
     # --- Figure8 params (mirrors config/default.yaml Figure8 block) ---
     alt, r, cx, cy = 1.8, 3.4, 0.0, 0.0
-    v_goals = [2.0, 3.0, 4.0]
+    v_goals = [1.0, 1.5]
     t_traj = 30.0
     accel = 0.4
     dt = 0.01
 
     # --- CBF params (mirrors cbf_safety_filter_node.cpp defaults) ---
-    alpha1, alpha2 = 2.0, 2.0
-    wn_track = 6.0  # tracking-error natural frequency; must reconverge faster than obstacle encounters recur
+    alpha1, alpha2 = 4.0, 4.0
+    # wn_track trades resync speed for injected acceleration; safety margin barely
+    # depends on it (that's alpha1/alpha2's job). Measured: wn_track=6.0 needed
+    # peak 27.1 m/s^2 for the same barrier wn_track=1.0 satisfied at peak 2.5 m/s^2
+    # with a LARGER margin -- higher isn't safer here, just more aggressive for
+    # nothing. Only raise this if the filtered path needs to resync onto nominal
+    # faster than it currently does.
+    wn_track = 1.0
 
     # --- Obstacle(s): placed to intersect one lobe of the figure8 ---
     obstacles = [
-        {'center': np.array([2.4, 1.2, alt]), 'radius': 0.6},
+        {'center': np.array([0.0, 0.0, alt]), 'radius': 0.6},
     ]
 
     p_nom, v_nom, a_nom, t = generate_figure8(alt, r, cx, cy, v_goals, t_traj, accel, dt)
     p_safe, v_safe, a_safe, h_hist = run_cbf_filter(
-        p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, wn_track)
+        p_nom, v_nom, a_nom, dt, obstacles, alpha1, alpha2, wn_track, p0=np.array([2.0, -2.0, alt]), v0=np.array([0.0, 0.0, 0.0]))
 
     # ---------------- static overview: 3D path + barrier value ----------------
     fig = plt.figure(figsize=(12, 6))

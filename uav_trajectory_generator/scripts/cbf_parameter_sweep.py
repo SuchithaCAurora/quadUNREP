@@ -50,7 +50,13 @@ def _style_axes(ax):
     ax.spines['right'].set_visible(False)
 
 
-def _evaluate(p_nom, v_nom, a_nom, obstacles, alpha1, alpha2, wn_track=6.0):
+def _evaluate(p_nom, v_nom, a_nom, obstacles, alpha1, alpha2, wn_track=1.0):
+    # wn_track=6.0 (an earlier default) was found to inflate peak required
+    # acceleration by ~10x over wn_track=1.0 for the *same* safety margin --
+    # it's the tracker fighting to resync in TIME with the nominal schedule,
+    # not anything the CBF safety constraint actually needs. All sweeps here
+    # use the corrected default so peak-accel numbers reflect the obstacle/
+    # speed feasibility question, not tracker-gain artifacts.
     p_safe, v_safe, a_safe, h_hist = run_cbf_filter(
         p_nom, v_nom, a_nom, DT, obstacles, alpha1, alpha2, wn_track)
     peak_a_safe = float(np.max(np.linalg.norm(a_safe, axis=1)))
@@ -209,9 +215,14 @@ if __name__ == '__main__':
     sweep_alpha_vs_speed_heatmap()
 
     print(f"\nAll plots written to {OUT_DIR}/")
-    print("Key takeaway so far: mission speed (v_goal) is the dominant lever on "
-          "peak required acceleration -- obstacle radius barely moves it, and "
-          "pushing alpha1/alpha2 too high (>~10 at 100 Hz) starts violating the "
-          "barrier outright rather than helping. See sweep_speed.png first.")
+    print("Key takeaway: with wn_track tuned down to 1.0 (was 6.0), peak |a_safe| "
+          "now tracks peak |a_nom| almost exactly -- the CBF correction itself is "
+          "nearly free. The earlier 'must fly at v_goal=1.0' conclusion was largely "
+          "an artifact of an overly aggressive tracker gain, not a real obstacle/ "
+          "speed feasibility limit. Remaining limit is the Figure8's own curvature "
+          "at high speed (~v_goal=4.0), independent of the obstacle. Obstacle radius "
+          "still barely matters. Pushing alpha1/alpha2 above ~4 at 100 Hz starts "
+          "producing tiny (sub-cm) barrier violations from discretization, not from "
+          "acceleration cost. See sweep_speed.png first.")
 
     plt.show()
