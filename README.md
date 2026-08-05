@@ -2,6 +2,8 @@
 
 This repository is modified from ACL: https://github.com/kotakondo/uav_trajectory_generator 
 
+This branch has tracking law and CBF for relative station keeping.
+
 For the UNREP Demo:
 build all packages as described below
 Choose which leader trajectory in the /config/default.yaml file
