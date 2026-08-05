@@ -1,6 +1,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <geometry_msgs/msg/quaternion.hpp>
+#include <geometry_msgs/msg/vector3.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <snapstack_msgs2/msg/goal.hpp>
 #include "snapstack_msgs2/msg/quad_flight_mode.hpp"
@@ -36,7 +37,8 @@ public:
         this->declare_parameter<double>("publish_freq", 100.0);
         this->declare_parameter<std::string>("leader_topic", "/SQ01/mavros/local_position/odom");
         this->declare_parameter<double>("goal_altitude", 3.0);
-        this->declare_parameter<double>("tuning_param", 0.01);
+        this->declare_parameter<double>("tuning_p", 0.01);
+        this->declare_parameter<double>("tuning_d", 0.01);
         this->declare_parameter<double>("max_speed", 2.0);
         this->declare_parameter<double>("deadzone_vctrl", 0.05);
         this->declare_parameter<std::string>("follower_topic", "mavros/local_position/odom");
@@ -53,10 +55,12 @@ public:
         this->declare_parameter("vel_land_slow", 0.0);
         this->declare_parameter("vel_yaw", 0.0);
         this->declare_parameter("alt", 0.0);
-
+        this->declare_parameter<double>("cbf_dmin", 0.0);
+        this->declare_parameter<double>("cbf_dmax", 0.0);
+        this->declare_parameter<double>("cbf_alpha", 0.0);
+        this->declare_parameter<bool>("use_cbf", false);
         // Initial position of follower drone with respect to map frame
         this->declare_parameter<std::vector<double>>("init_follower_offset", {0.0, 3.0, 0.0}); 
-
         this->get_parameter("follower_mode", follower_mode_);
         this->get_parameter("follower_distance_T", follower_distance_T_);
         this->get_parameter("follower_distance_N", follower_distance_N_);
@@ -64,7 +68,8 @@ public:
         this->get_parameter("leader_topic", leader_topic_);
         this->get_parameter("goal_altitude", goal_altitude_);
         this->get_parameter("init_follower_offset", init_follower_offset_);
-        this->get_parameter("tuning_param", p_tuning_);
+        this->get_parameter("tuning_p", p_tuning_);
+        this->get_parameter("tuning_d", d_tuning_);
         this->get_parameter("max_speed", u_follower_max_);
         this->get_parameter("deadzone_vctrl", deadband_);
         this->get_parameter("follower_topic", follower_topic_);
@@ -81,7 +86,10 @@ public:
         this->get_parameter("vel_land_slow", vel_land_slow_);
         this->get_parameter("vel_yaw", vel_yaw_);
         this->get_parameter("alt", alt_);
-
+        this->get_parameter("cbf_dmin", d_min_);
+        this->get_parameter("cbf_dmax", d_max_);
+        this->get_parameter("cbf_alpha", alpha_);
+        this->get_parameter("use_cbf", use_cbf_);
         double publish_freq;
         this->get_parameter("publish_freq", publish_freq);
         if (publish_freq <= 0.0) {
@@ -114,6 +122,8 @@ public:
         mode_sub_ = this->create_subscription<snapstack_msgs2::msg::QuadFlightMode>("globalflightmode", 1, std::bind(&FollowerGoalGenerator::modeCB, this, _1));
 
         goal_pub_ = this->create_publisher<snapstack_msgs2::msg::Goal>("goal", 10);
+
+        debug_sep_distance_ = this->create_publisher<geometry_msgs::msg::Vector3>("separation_dist", 10);
 
         timer_ = this->create_wall_timer(
             std::chrono::duration<double>(dt_),
@@ -308,93 +318,9 @@ private:
     }
 
 
-    snapstack_msgs2::msg::Goal simpleInterpolation(const Eigen::Vector3d& current_pos,double current_psi,
-        const Eigen::Vector3d& current_vel, const snapstack_msgs2::msg::Goal& dest_pos, double dest_yaw, const Eigen::Vector3d& desired_vel, double vel_yaw,
-        double dist_thresh, double yaw_thresh, double dt, bool& finished)
-    {
-        // this requires having the goal in the world frame and current position in the world frame
-        // also the velocities in the world frame
-        snapstack_msgs2::msg::Goal goal;
-        // interpolate from current goal pos to the initial goal pos
-        double Dx = dest_pos.p.x - current_pos.x();
-        double Dy = dest_pos.p.y - current_pos.y();
-        double dist = sqrt(Dx*Dx + Dy*Dy);
-        double delta_yaw = dest_yaw - current_psi;
-        delta_yaw = wrap(delta_yaw);
-
-        bool dist_far = dist > dist_thresh;
-        bool yaw_far  = fabs(delta_yaw) > yaw_thresh;
-        finished = not dist_far and not yaw_far;  // both are close
-
-        double accel_for_vel = 0.1;
-
-        goal.p.z = dest_pos.p.z;  // this should be alt_ and the altitude where the drone took off too
-        // are we too far from the dest?
-        if(dist_far){
-            double c = Dx/dist; // separation displacement (component of unit vector)
-            double s = Dy/dist; // separation displacement (component of unit vector)
-
-            goal.p.x = current_pos.x() + c*std::fabs(desired_vel.x())*dt; //TODO: fix this logic: what does vel actually mean here?
-            // TODO: in Kota's code, vel is a double -- what does that mean?
-            goal.p.y = current_pos.y() + s*std::fabs(desired_vel.y())*dt; // the sign is already baked into the separation displacement variables, so take fabs to get speed rather than velocity
-            RCLCPP_INFO(
-            this->get_logger(),
-            "goal x value (%.2f) , goal y (%.2f), desired x (%.2f), desired y (%.2f)",
-            goal.p.x, goal.p.y, dest_pos.p.x, dest_pos.p.y);
-            // make the vel ref smooth
-            // old lines are:
-                //goal.v.x = c*vel;
-                //goal.v.y = s*vel;
-            RCLCPP_INFO(
-            this->get_logger(),
-            "c (%.2f) , s (%.2f)",
-            c, s);
-            goal.v.x = std::min(current_vel.x() + accel_for_vel*dt, c*desired_vel.x()); // this portion no longer makes sense - c and s extract out components of total velocity
-            goal.v.y = std::min(current_vel.y() + accel_for_vel*dt, s*desired_vel.y());
-            RCLCPP_INFO(
-            this->get_logger(),
-            "vx (%.2f) , vy (%.2f)",
-            goal.v.x, goal.v.y);
-            // RCLCPP_INFO(
-            // this->get_logger(),
-            // "x_vel value (%.2f) , y_vel (%.2f)",
-            // goal.v.x, goal.v.y);
-            // RCLCPP_INFO(
-            // this->get_logger(),
-            // "c value (%.2f) , s (%.2f)",
-            // c, s);
-        }else{
-            goal.p.x = dest_pos.p.x;
-            goal.p.y = dest_pos.p.y;
-
-            // make the vel ref smooth
-            // old lines are:
-                //goal.v.x = 0;
-                //goal.v.y = 0;
-            
-            goal.v.x = std::max(0.0, current_vel.x() - accel_for_vel*dt);
-            goal.v.y = std::max(0.0, current_vel.y() - accel_for_vel*dt);
-            
-        }
-        // is the yaw close enough to the desired?
-        if(yaw_far){
-            int sgn = delta_yaw >= 0? 1 : -1;
-            vel_yaw = sgn*vel_yaw;  // ccw or cw, the smallest angle
-            goal.psi = current_psi + vel_yaw*dt;
-            goal.dpsi = vel_yaw;
-        }else{
-            goal.psi = dest_yaw;
-            goal.dpsi = 0;
-        }
-
-        // Remember to set power
-        goal.power = true;
-
-        return goal;
-    }
-
     void followerLogic(){
 
+        // Get positions & orientations
         const auto& L_pos = leader_odom_.pose.pose.position;
         const auto& L_qmsg = leader_odom_.pose.pose.orientation;
         const auto& L_vel = leader_odom_.twist.twist.linear;
@@ -410,7 +336,7 @@ private:
         Eigen::Vector3d leader_pos_world(L_pos.x, L_pos.y, L_pos.z);
         Eigen::Vector3d follower_pos_local(F_pos.x, F_pos.y, F_pos.z);
 
-        // Offset in leader body frame: behind leader in T, and optionally lateral/vertical offsets
+        // Desired offset in leader body frame
         Eigen::Vector3d desired_offset_tnb(
             follower_distance_T_,
             follower_distance_N_,
@@ -425,9 +351,9 @@ private:
         // Desired position of the follower in the world frame
         Eigen::Vector3d desired_p_follower = leader_pos_world + L_q * desired_offset_tnb - init_offset_world;
 
-
+        // Actual position of follower in the world frame
         Eigen::Vector3d follower_pos_world = follower_pos_local + init_offset_world;
-        // Relative displacement from follower to leader in world
+        // Relative displacement from follower to leader in world frame
         Eigen::Vector3d rel_world = follower_pos_world - leader_pos_world;
         // Express relative displacement in leader body frame (TNB)
         Eigen::Vector3d rel_tnb = L_q.inverse() * rel_world;
@@ -435,7 +361,15 @@ private:
         // Formation error in leader frame
         Eigen::Vector3d e_form = desired_offset_tnb - rel_tnb;
 
-        // Leader velocity (note that odom twist message is expressed in childe_frame_id)
+        // DEBUGGING ---------------------------------
+        geometry_msgs::msg::Vector3 e_msg;
+        e_msg.x = e_form.x();
+        e_msg.y = e_form.y();
+        e_msg.z = e_form.z();
+        debug_sep_distance_->publish(e_msg);
+        // ------------------------------------------
+
+        // Leader & follower velocity (note that odom twist message is expressed in child_frame_id)
         Eigen::Vector3d leader_vel_tnb(L_vel.x, L_vel.y, L_vel.z);
         Eigen::Vector3d follower_vel_tnb(F_vel.x, F_vel.y, F_vel.z);
         Eigen::Vector3d follower_vel_world = F_q * follower_vel_tnb;
@@ -445,14 +379,54 @@ private:
         double sT = applyDeadband(e_form.x(), deadband_);
         double sN = applyDeadband(e_form.y(), deadband_);
         double sB = applyDeadband(e_form.z(), deadband_);
-        double uT = leader_vel_tnb.x() + u_follower_max_ * sT / std::sqrt(sT*sT + p_tuning_ * p_tuning_);
+        double uT = leader_vel_tnb.x() + u_follower_max_ * sT / std::sqrt(sT*sT + p_tuning_ * p_tuning_); 
         double uN = leader_vel_tnb.y() + u_follower_max_ * sN / std::sqrt(sN*sN + p_tuning_ * p_tuning_);
-        double uB = leader_vel_tnb.z() + u_follower_max_ * sB / std::sqrt(sB*sB + p_tuning_ * p_tuning_);
+        double uB = leader_vel_tnb.z() + u_follower_max_ * sB / std::sqrt(sB*sB + p_tuning_ * p_tuning_); 
 
+        if (use_cbf_){
+
+            // Set nominal velocities to 0. 
+            // Because in this demo, we are showing how CBFs can be used for formation flight without a nominal input
+            uT = 0.0;
+            uN = 0.0;
+            uB = 0.0;
+            Eigen::Vector3d follower_u_tnb(uT, uN, uB); // the nominal inputs
+            // Let the moving barrier constraint be projected onto the desired follower positions
+            Eigen::Vector3d vel_err_tnb = follower_u_tnb - leader_vel_tnb;
+            Eigen::Vector3d relative_sep = - e_form; // relative separation between the desired and actual follower position (x_F - (x_L + desired_offset))
+            // Compute lagrangian multipliers
+            double delH1_x = vel_err_tnb.x() + alpha_*(relative_sep.x() - d_max_);
+            double delH2_x = -vel_err_tnb.x() + alpha_*(-relative_sep.x() - d_max_);
+            double delH1_y = vel_err_tnb.y() + alpha_*(relative_sep.y() - d_max_);
+            double delH2_y = -vel_err_tnb.y() + alpha_*(-relative_sep.y() - d_max_);
+            double delH1_z = vel_err_tnb.z() + alpha_*(relative_sep.z() - d_max_);
+            double delH2_z = -vel_err_tnb.z() + alpha_*(-relative_sep.z() - d_max_);
+            double lambda1_x = 2*std::max(0.0, delH1_x);
+            double lambda2_x = 2*std::max(0.0, delH2_x);
+            double lambda1_y = 2*std::max(0.0, delH1_y);
+            double lambda2_y = 2*std::max(0.0, delH2_y);
+            double lambda1_z = 2*std::max(0.0, delH1_z);
+            double lambda2_z = 2*std::max(0.0, delH2_z);
+            // Compute the augmentation.
+            double pi_x = 0.5 * (lambda2_x - lambda1_x);
+            double pi_y = 0.5 * (lambda2_y - lambda1_y);
+            double pi_z = 0.5 * (lambda2_z - lambda1_z);
+
+            uT += pi_x;
+            uN += pi_y;
+            uB += pi_z;
+            RCLCPP_INFO(
+            this->get_logger(),
+            "current pos error (%.2f, %.2f %.2f), velocities (%.2f, %.2f, %.2f)",
+            std::abs(e_form.x()), std::abs(e_form.y()), std::abs(e_form.z()), uT, uN, uB);
+        }
+
+        // Saturate velocity commands that exceed max_speed
         Eigen::Vector3d v_TNB(uT,uN,uB);
         double norm = v_TNB.norm();
         norm = std::fabs(norm);
         if (norm > u_follower_max_ && norm  > 1e-9) {
+            RCLCPP_INFO(this->get_logger(), "SATURATED");
             v_TNB *= (u_follower_max_ / norm);
         }
 
@@ -572,11 +546,6 @@ private:
         // apply safety bounds. Exceptions: when killing the drone and when clicking END at init pos traj
 
         goal_pub_->publish(goal_);
-
-        RCLCPP_INFO(
-            this->get_logger(),
-            "velocities (%.2f, %.2f, %.2f)",
-            goal_.v.x, goal_.v.y, goal_.v.z);
     }
 
     void resetGoal(){
@@ -631,6 +600,7 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr self_state_sub_;
     rclcpp::Subscription<snapstack_msgs2::msg::QuadFlightMode>::SharedPtr mode_sub_;  // "flightmode" Subscription
     rclcpp::Publisher<snapstack_msgs2::msg::Goal>::SharedPtr goal_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr debug_sep_distance_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     nav_msgs::msg::Odometry leader_odom_;
@@ -672,10 +642,16 @@ private:
     double dt_{0.01};
     std::vector<double> init_follower_offset_;
     double p_tuning_;
+    double d_tuning_;
     double deadband_;
     double dist_thresh_{0.5};
     double yaw_thresh_{0.5};
 
+    // FOR CBF
+    double d_min_;
+    double d_max_;
+    double alpha_;
+    bool use_cbf_;
 };
 
 

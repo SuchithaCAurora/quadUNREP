@@ -2,16 +2,17 @@ SQ02:
   follower_traj_generator2:
     ros__parameters:
       follower_mode: "heading_based"
-      follower_distance_T: 0.0 # positive means behind leader
-      follower_distance_N: 3.0 # positive means to the right
-      follower_distance_B: 0.0 # positive means above
+      follower_distance_T: 0.0 # positive means in front of leader
+      follower_distance_N: 0.0 # positive means to the left
+      follower_distance_B: 1.0 # positive means above
       publish_freq: 100.0
       leader_topic: "/SQ01/mavros/local_position/odom"
       goal_altitude: 3.0
       max_speed: 1.5
       init_follower_offset: [0.0, 3.0, 0.0]
-      tuning_param: 1.0
-      deadzone_vctrl: 0.25
+      tuning_p: 2.0 # was originally 2.0
+      tuning_d: 0.5
+      deadzone_vctrl: 0.0
       follower_topic: "mavros/local_position/odom" # PROVIDE TOPIC WITHOUT NAMESPACED
 
       # ====================================================================
@@ -42,3 +43,12 @@ SQ02:
       y_max:  5.0   # [m]
       z_min: -5.0   # [m]
       z_max:  5.0   # [m]
+
+
+      # ==============================
+      # For CBF
+      # ===============================
+      cbf_dmin: 2.0 # [m] NO LONGER BEING USED
+      cbf_dmax: 0.25
+      cbf_alpha: 0.7
+      use_cbf: true

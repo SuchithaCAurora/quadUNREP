@@ -72,7 +72,7 @@ TrajectoryGenerator::TrajectoryGenerator()
     traj_goals_ = traj_goals_full_;
     index_msgs_ = index_msgs_full_;
 
-    subs_mode_ = this->create_subscription<snapstack_msgs2::msg::QuadFlightMode>("/globalflightmode", 1, std::bind(&TrajectoryGenerator::modeCB, this, _1));
+    subs_mode_ = this->create_subscription<snapstack_msgs2::msg::QuadFlightMode>("globalflightmode", 1, std::bind(&TrajectoryGenerator::modeCB, this, _1));
     subs_state_ = this->create_subscription<snapstack_msgs2::msg::State>("state", qos_profile, std::bind(&TrajectoryGenerator::stateCB, this, _1));
     pub_timer_ = this->create_wall_timer(
         std::chrono::duration<double>(dt_), 
