@@ -14,3 +14,11 @@ PX03:
       init_follower_offset: [0.0, 0.0, 0.0]
       tuning_param: 10.0
       deadzone_vctrl: 0.05
+
+      # ==============================
+      # For CBF
+      # ===============================
+      cbf_dmin: 2.0 # [m] NO LONGER BEING USED
+      cbf_dmax: 0.25
+      cbf_alpha: 0.7
+      use_cbf: false
