@@ -9,7 +9,7 @@ SQ01:
 
       # Which trajectory to fly. Each name below has its own block of
       # parameters; only the selected block is read at startup.
-      traj_type: Figure8
+      traj_type: Circle
       # Options: Circle | Figure8 | Square | Rectangle | Line | Boomerang |
       #          Reciprocating | Bounce | M | I | T
 
@@ -19,15 +19,15 @@ SQ01:
 
       # --- Circle: flat constant-altitude circle in XY plane --------------
       Circle:
-        r:            3.4              # [m]    radius of the circle
+        r:            2.4              # [m]    radius of the circle
         center_x:     0.0              # [m]    world-frame X of center
         center_y:     0.0              # [m]    world-frame Y of center
-        v_goals:      [1.0, 2.0, 2.0]  # [m/s]  speed schedule; one leg per entry.
+        v_goals:      [0.5]  # [m/s]  speed schedule; one leg per entry.
                                        #        For each entry the drone ramps up,
                                        #        holds for t_traj seconds, then
                                        #        ramps back down to 0.
         t_traj:       80.0             # [s]    hold time per v_goals entry
-        circle_accel: 0.4              # [m/s^2] cap on tangential accel during
+        circle_accel: 0.2              # [m/s^2] cap on tangential accel during
                                        #         speed ramps (NOT the centripetal
                                        #         v^2/r load; keep well below g/2).
 
@@ -38,14 +38,14 @@ SQ01:
         r:            3.4              # [m]    half-width of each lobe
         center_x:     0.0              # [m]
         center_y:     0.0              # [m]
-        v_goals:      [2.0, 3.0, 4.0]  # [m/s]  see Circle.v_goals
+        v_goals:      [0.5]  # [m/s]  see Circle.v_goals
         t_traj:       30.0             # [s]
-        circle_accel: 0.4              # [m/s^2]
+        circle_accel: 0.2              # [m/s^2]
 
       # --- Square: trapezoidal-velocity-profile square laps --------------
       Square:
-        side_length:  2.0    # [m]     length of each side
-        square_accel: 0.4    # [m/s^2] decel/accel cap at corners
+        side_length:  6.0    # [m]     length of each side
+        square_accel: 0.2    # [m/s^2] decel/accel cap at corners
         orientation:  0.0    # [rad]   rotation of the square in XY plane
         center_x:     0.0    # [m]
         center_y:     0.0    # [m]
@@ -57,7 +57,7 @@ SQ01:
       Rectangle:
         side_a:          2.0    # [m]     length of side A
         side_b:          4.0    # [m]     length of side B
-        rectangle_accel: 0.4    # [m/s^2] decel/accel cap at corners
+        rectangle_accel: 0.2    # [m/s^2] decel/accel cap at corners
         orientation:     0.0    # [rad]
         center_x:        0.0    # [m]
         center_y:        0.0    # [m]
